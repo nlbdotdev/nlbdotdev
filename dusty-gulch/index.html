@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dusty Gulch — a lightweight New Vegas-like prototype</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🤠</text></svg>">
+<style>
+  :root {
+    --amber: #ffb642;
+    --amber-dim: rgba(255, 182, 66, 0.55);
+    --amber-faint: rgba(255, 182, 66, 0.18);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: "Courier New", Courier, monospace; color: var(--amber); user-select: none; }
+  #game { position: fixed; inset: 0; display: block; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  .panel {
+    position: absolute;
+    background: rgba(10, 10, 8, 0.55);
+    border: 1px solid var(--amber-dim);
+    padding: 8px 14px;
+    text-shadow: 0 0 6px rgba(255, 182, 66, 0.6);
+    letter-spacing: 1px;
+  }
+  #health-panel { left: 24px; bottom: 24px; min-width: 190px; }
+  #ammo-panel { right: 24px; bottom: 24px; text-align: right; min-width: 150px; }
+  #caps-panel { right: 24px; top: 24px; text-align: right; }
+  .label { font-size: 11px; opacity: 0.8; }
+  .big { font-size: 26px; font-weight: bold; }
+  .bar { width: 100%; height: 8px; border: 1px solid var(--amber-dim); margin-top: 4px; }
+  .bar > div { height: 100%; background: var(--amber); width: 100%; transition: width 0.15s; }
+
+  #compass {
+    position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+    width: 340px; height: 26px; overflow: hidden;
+    background: rgba(10,10,8,0.55); border: 1px solid var(--amber-dim);
+  }
+  #compass-strip { position: absolute; top: 3px; left: 0; white-space: nowrap; font-size: 14px; letter-spacing: 0; }
+  #compass::after {
+    content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+    border-left: 1px solid var(--amber); box-shadow: 0 0 6px var(--amber);
+  }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 18px; color: var(--amber); text-shadow: 0 0 5px rgba(255,182,66,0.8);
+  }
+  #hitmarker {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(45deg);
+    font-size: 22px; color: #fff; opacity: 0; transition: opacity 0.25s;
+  }
+
+  #prompt {
+    position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%);
+    font-size: 15px; padding: 6px 16px;
+    background: rgba(10,10,8,0.6); border: 1px solid var(--amber-dim);
+    display: none;
+  }
+  #dialogue {
+    position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%);
+    width: min(640px, 84vw); padding: 14px 20px;
+    background: rgba(10,10,8,0.82); border: 1px solid var(--amber);
+    display: none;
+  }
+  #dialogue .name { font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid var(--amber-faint); padding-bottom: 4px; }
+  #dialogue .hint { font-size: 11px; opacity: 0.65; margin-top: 8px; text-align: right; }
+
+  #toast {
+    position: absolute; left: 50%; top: 64px; transform: translateX(-50%);
+    font-size: 14px; opacity: 0; transition: opacity 0.4s;
+    background: rgba(10,10,8,0.6); border: 1px solid var(--amber-dim); padding: 5px 14px;
+  }
+
+  #damage-vignette {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(180, 20, 10, 0.55) 100%);
+  }
+  #death-screen {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; background: rgba(20, 0, 0, 0.72); pointer-events: none;
+  }
+  #death-screen h1 { font-size: 52px; color: #d33; letter-spacing: 6px; text-shadow: 0 0 18px rgba(255,0,0,0.5); }
+
+  /* ---------- Title / pause screen ---------- */
+  #title-screen {
+    position: fixed; inset: 0; z-index: 10; display: flex;
+    align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+    background: radial-gradient(ellipse at center, rgba(30,22,10,0.92), rgba(5,4,2,0.97));
+    cursor: pointer; text-align: center;
+  }
+  #title-screen h1 { font-size: 56px; letter-spacing: 10px; text-shadow: 0 0 24px rgba(255,182,66,0.5); }
+  #title-screen h2 { font-size: 15px; font-weight: normal; opacity: 0.8; letter-spacing: 3px; }
+  #title-screen .controls {
+    margin-top: 14px; font-size: 13px; line-height: 1.9; opacity: 0.85;
+    border: 1px solid var(--amber-faint); padding: 12px 26px; text-align: left;
+  }
+  #title-screen .start { margin-top: 12px; font-size: 17px; animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  kbd {
+    display: inline-block; min-width: 18px; text-align: center;
+    border: 1px solid var(--amber-dim); padding: 0 5px; margin-right: 6px; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="compass"><div id="compass-strip"></div></div>
+  <div id="crosshair">+</div>
+  <div id="hitmarker">+</div>
+
+  <div id="health-panel" class="panel">
+    <div class="label">HP</div>
+    <div class="big" id="hp-num">100</div>
+    <div class="bar"><div id="hp-bar"></div></div>
+  </div>
+
+  <div id="ammo-panel" class="panel">
+    <div class="label" id="weapon-name">.357 REVOLVER</div>
+    <div class="big"><span id="ammo-mag">6</span><span style="font-size:14px;opacity:.7">/<span id="ammo-reserve">48</span></span></div>
+  </div>
+
+  <div id="caps-panel" class="panel">
+    <div class="label">CAPS</div>
+    <div class="big" id="caps-num">25</div>
+  </div>
+
+  <div id="prompt"></div>
+  <div id="dialogue">
+    <div class="name" id="dlg-name"></div>
+    <div id="dlg-text"></div>
+    <div class="hint">[E] continue &nbsp;/&nbsp; [Q] leave</div>
+  </div>
+  <div id="toast"></div>
+  <div id="damage-vignette"></div>
+  <div id="death-screen"><h1>YOU DIED</h1><div>The desert keeps what it takes.</div></div>
+</div>
+
+<div id="title-screen">
+  <h1>DUSTY GULCH</h1>
+  <h2>A LIGHTWEIGHT NEW VEGAS-LIKE PROTOTYPE</h2>
+  <div class="controls">
+    <div><kbd>W A S D</kbd> move &nbsp;&nbsp;<kbd>SHIFT</kbd> sprint &nbsp;&nbsp;<kbd>SPACE</kbd> jump</div>
+    <div><kbd>MOUSE</kbd> look &nbsp;&nbsp;<kbd>LMB</kbd> shoot &nbsp;&nbsp;<kbd>R</kbd> reload</div>
+    <div><kbd>1</kbd> revolver &nbsp;&nbsp;<kbd>2</kbd> repeater rifle</div>
+    <div><kbd>E</kbd> talk / mount &amp; dismount horse</div>
+    <div><kbd>ESC</kbd> release mouse</div>
+  </div>
+  <div class="start">[ CLICK TO ENTER THE MOJAVE ]</div>
+</div>
+
+<script type="importmap">
+  { "imports": { "three": "./lib/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
