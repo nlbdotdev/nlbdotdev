@@ -30,12 +30,24 @@ Then open http://localhost:8080 and click to lock the mouse.
 - **Horses** — three of them, hitched around town. Walk up, press `E` to
   mount, `SHIFT` to gallop, `E` again to dismount. Legs animate, heads dip
   to graze while idle.
-- **NPCs** — six named townsfolk who wander their patches and offer
-  wasteland gossip through a dialogue box (`E` to talk, `Q` to leave), and a
-  Viper Gang camp east of town: five hostiles who aggro, chase, and shoot
-  back. Kill them for caps. Shoot a civilian and the town remembers.
-- **The HUD** — Pip-Boy-amber panels for HP, ammo, and caps, a scrolling
-  compass, damage vignette, death/respawn, and slow health regen.
+- **NPCs** — seven named townsfolk who wander their patches (or keep shop)
+  and talk through a dialogue box with numbered choices (`E` to talk, `1-9`
+  to choose, `Q` to leave), and a Viper Gang camp east of town: five
+  hostiles who aggro, chase, and shoot back. Kill them for caps. Shoot a
+  civilian and the town remembers.
+- **Quests** — three of them, with a quest log (`J`) and an on-screen
+  objective tracker: clear the Viper camp for Sheriff Vance's bounty, run
+  Doc Whitley's medicine over to Widow Calloway, and recover Prospector
+  Jeb's lucky pickaxe from a cairn out west.
+- **Interiors** — the saloon, general store, and clinic are enterable
+  New Vegas-style cells (walk to the door, press `E`): lantern-lit rooms
+  with a bar, shelves, piano, patient bed, and the rest.
+- **Merchants** — Barkeep Sal pours drinks, Trader Rosa sells ammo and a
+  max-HP hat, Doc Whitley patches you up and sells stimpaks (`H` to use
+  one from your inventory). All trading happens in a keyboard-driven
+  shop panel.
+- **The HUD** — Pip-Boy-amber panels for HP, ammo, caps, and stimpaks, a
+  scrolling compass, damage vignette, death/respawn, and slow health regen.
 
 ## Controls
 
@@ -48,8 +60,11 @@ Then open http://localhost:8080 and click to lock the mouse.
 | `1` / `2` | Revolver / repeater |
 | `SHIFT` | Sprint / gallop |
 | `SPACE` | Jump |
-| `E` | Talk / mount / dismount / advance dialogue |
-| `Q` | Leave dialogue |
+| `E` | Talk / trade / enter buildings / mount & dismount |
+| `1-9` | Pick dialogue option / buy shop item |
+| `Q` | Leave dialogue or shop |
+| `J` | Quest log |
+| `H` | Use a stimpak |
 | `ESC` | Release mouse |
 
 ## Tech notes
@@ -58,5 +73,12 @@ Then open http://localhost:8080 and click to lock the mouse.
 - One module (`main.js`): terrain, town builder, particle/tracer pools,
   NPC AI (wander / flee / chase-and-shoot), horse riding, weapon view
   models, and a pointer-locked FPS controller with AABB collision.
+- Interior "cells" are boxed rooms built 30 units below the terrain and
+  entered by door teleport with a fade — the same trick New Vegas load
+  doors pull, minus the loading screen. Ground height and collision are
+  elevation-aware so the surface world and interiors never interfere.
+- Quests are tiny state machines wired into the dialogue trees; dialogue
+  nodes carry numbered options whose actions advance stages, grant caps,
+  or open a merchant's shop.
 - Sounds are synthesized with the Web Audio API (noise bursts and
   oscillator blips) — no audio files.

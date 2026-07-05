@@ -13,9 +13,14 @@ const ui = {
   title: $('title-screen'),
   hpNum: $('hp-num'), hpBar: $('hp-bar'),
   ammoMag: $('ammo-mag'), ammoReserve: $('ammo-reserve'), weaponName: $('weapon-name'),
-  caps: $('caps-num'),
+  caps: $('caps-num'), stims: $('stim-num'),
   prompt: $('prompt'),
   dialogue: $('dialogue'), dlgName: $('dlg-name'), dlgText: $('dlg-text'),
+  dlgOptions: $('dlg-options'), dlgHint: $('dlg-hint'),
+  shop: $('shop'), shopName: $('shop-name'), shopRows: $('shop-rows'), shopCaps: $('shop-caps'),
+  questLog: $('quest-log'), questRows: $('quest-rows'),
+  tracker: $('tracker'),
+  fade: $('fade'),
   toast: $('toast'),
   vignette: $('damage-vignette'),
   death: $('death-screen'),
@@ -143,8 +148,10 @@ scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x8a6a45, 0.9));
 // Shared helpers / registries
 // ---------------------------------------------------------------------------
 const worldMeshes = [];   // raycast-blocking scenery (bullets stop here)
-const colliders = [];     // AABBs the player/horses can't walk through {minX,maxX,minZ,maxZ}
+const colliders = [];     // AABBs the player/horses can't walk through {minX,maxX,minZ,maxZ,minY?,maxY?}
 const interactables = []; // { pos: ()=>Vector3, radius, label, action }
+const cells = [];         // interior "cells" (FNV-style separate rooms, built below the terrain)
+const FLOOR_Y = -30;      // interior floor elevation
 
 const MAT = {
   wood: new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.95 }),
@@ -185,6 +192,17 @@ function terrainHeight(x, z) {
     Math.sin((x + z) * 0.009) * 2.2;
   const d = Math.hypot(x, z);
   return h * smoothstep(52, 110, d);
+}
+
+// Ground height that is interior-aware: below y=-10 you're in a cell, so the
+// cell floor wins; on the surface the terrain wins.
+function groundHeightAt(x, z, y = 0) {
+  if (y < -10) {
+    for (const c of cells) {
+      if (Math.abs(x - c.ox) < c.w / 2 + 2 && Math.abs(z - c.oz) < c.d / 2 + 2) return c.floorY;
+    }
+  }
+  return terrainHeight(x, z);
 }
 
 {
@@ -370,6 +388,223 @@ for (let i = 0; i < 10; i++) {
 }
 
 // ---------------------------------------------------------------------------
+// Interiors — separate "cells" buried far beneath the terrain, entered
+// through building doors with a fade, exactly like New Vegas load doors
+// (minus the loading screen).
+// ---------------------------------------------------------------------------
+function fadeTeleport(fn) {
+  ui.fade.style.opacity = 1;
+  setTimeout(() => { fn(); ui.fade.style.opacity = 0; }, 240);
+}
+
+function enterCell(cell) {
+  if (player.mounted) { toast('Hitch your horse first.'); return; }
+  fadeTeleport(() => {
+    player.cell = cell;
+    player.pos.copy(cell.spawn);
+    player.vel.set(0, 0, 0);
+    player.onGround = true;
+    player.yaw = 0;
+    player.pitch = 0;
+  });
+}
+function exitCell(cell) {
+  fadeTeleport(() => {
+    player.cell = null;
+    player.pos.copy(cell.exit);
+    player.pos.y = terrainHeight(cell.exit.x, cell.exit.z);
+    player.vel.set(0, 0, 0);
+    player.onGround = true;
+    player.yaw = Math.PI; // face the street
+    player.pitch = 0;
+  });
+}
+
+const MAT_I = {
+  floor: new THREE.MeshStandardMaterial({ color: 0x6b5138, roughness: 1 }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x87684a, roughness: 1 }),
+  ceil: new THREE.MeshStandardMaterial({ color: 0x54402c, roughness: 1 }),
+  counter: new THREE.MeshStandardMaterial({ color: 0x4e3a24, roughness: 0.85 }),
+  linen: new THREE.MeshStandardMaterial({ color: 0xcfc4a8, roughness: 1 }),
+};
+
+function makeInterior({ name, ox, oz, w, d, h = 3.4, doorOutside, label }) {
+  const g = new THREE.Group();
+  const t = 0.4; // wall thickness
+  const floor = box(w, 0.3, d, MAT_I.floor, 0, -0.15, 0);
+  const ceil = box(w, 0.3, d, MAT_I.ceil, 0, h + 0.15, 0);
+  const wallN = box(w, h, t, MAT_I.wall, 0, h / 2, -d / 2 - t / 2);
+  const wallS = box(w, h, t, MAT_I.wall, 0, h / 2, d / 2 + t / 2);
+  const wallW = box(t, h, d + t * 2, MAT_I.wall, -w / 2 - t / 2, h / 2, 0);
+  const wallE = box(t, h, d + t * 2, MAT_I.wall, w / 2 + t / 2, h / 2, 0);
+  g.add(floor, ceil, wallN, wallS, wallW, wallE);
+  // Door frame on the south wall (visual anchor for the exit)
+  const doorPanel = box(1.2, 2.3, 0.15, new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 1 }), 0, 1.15, d / 2 + t / 2 - 0.14);
+  g.add(doorPanel);
+  g.position.set(ox, FLOOR_Y, oz);
+  scene.add(g);
+  g.traverse((o) => { if (o.isMesh) worldMeshes.push(o); });
+
+  // Wall colliders (active only at interior elevation)
+  const yb = { minY: FLOOR_Y - 2, maxY: FLOOR_Y + h + 1 };
+  colliders.push(
+    { minX: ox - w / 2 - t, maxX: ox + w / 2 + t, minZ: oz - d / 2 - t, maxZ: oz - d / 2, ...yb },
+    { minX: ox - w / 2 - t, maxX: ox + w / 2 + t, minZ: oz + d / 2, maxZ: oz + d / 2 + t, ...yb },
+    { minX: ox - w / 2 - t, maxX: ox - w / 2, minZ: oz - d / 2, maxZ: oz + d / 2, ...yb },
+    { minX: ox + w / 2, maxX: ox + w / 2 + t, minZ: oz - d / 2, maxZ: oz + d / 2, ...yb },
+  );
+
+  // Two warm lanterns
+  for (const lx of [-w / 4, w / 4]) {
+    const lamp = new THREE.PointLight(0xffa050, 14, 18, 2);
+    lamp.position.set(ox + lx, FLOOR_Y + h - 0.4, oz);
+    scene.add(lamp);
+    const bulb = box(0.14, 0.2, 0.14, new THREE.MeshStandardMaterial({ color: 0xffc070, emissive: 0xff9040, emissiveIntensity: 1.5 }), ox + lx, FLOOR_Y + h - 0.35, oz, false);
+    scene.add(bulb);
+  }
+
+  const cell = {
+    name, ox, oz, w, d, floorY: FLOOR_Y,
+    spawn: new THREE.Vector3(ox, FLOOR_Y, oz + d / 2 - 1.5),
+    exit: new THREE.Vector3(doorOutside.x, 0, doorOutside.z + 1.4),
+    group: g,
+    // Helper: place things in room-local coords
+    at: (dx, dz) => new THREE.Vector3(ox + dx, FLOOR_Y, oz + dz),
+    addCollider: (dx, dz, cw, cd) => colliders.push({
+      minX: ox + dx - cw / 2, maxX: ox + dx + cw / 2,
+      minZ: oz + dz - cd / 2, maxZ: oz + dz + cd / 2, ...yb,
+    }),
+    addMesh: (m) => { scene.add(m); m.traverse((o) => { if (o.isMesh) worldMeshes.push(o); }); },
+  };
+  cells.push(cell);
+
+  // Exterior door: enter
+  interactables.push({
+    pos: () => new THREE.Vector3(doorOutside.x, 0, doorOutside.z),
+    radius: 2.4,
+    label: () => (player.cell ? null : `Enter ${label}`),
+    action: () => enterCell(cell),
+  });
+  // Interior door: exit
+  const exitSpot = cell.at(0, d / 2 - 0.9);
+  interactables.push({
+    pos: () => exitSpot,
+    radius: 2.2,
+    label: () => (player.cell === cell ? 'Exit to Dusty Gulch' : null),
+    action: () => exitCell(cell),
+  });
+  return cell;
+}
+
+// --- Prospector Saloon interior ---
+const saloonCell = makeInterior({
+  name: 'saloon', ox: -60, oz: -65, w: 15, d: 11,
+  doorOutside: { x: -16, z: -6.6 }, label: 'the Prospector Saloon',
+});
+{
+  const c = saloonCell;
+  // Bar along the west wall
+  const bar = box(1.1, 1.05, 7, MAT_I.counter, 0, 0.52, 0);
+  bar.position.copy(c.at(-5.6, 0)); bar.position.y += 0.52;
+  c.addMesh(bar); c.addCollider(-5.6, 0, 1.3, 7.2);
+  // Back shelf with glowing bottles
+  const shelf = box(0.4, 2.2, 6.5, MAT_I.counter, 0, 1.1, 0);
+  shelf.position.copy(c.at(-7.1, 0)); shelf.position.y += 1.1;
+  c.addMesh(shelf);
+  for (let i = 0; i < 9; i++) {
+    const colors = [0x8a5a20, 0x4a7a3a, 0x9a3a2a, 0x6a6a9a];
+    const b = cylinder(0.06, 0.07, rand(0.28, 0.4), new THREE.MeshStandardMaterial({
+      color: colors[i % 4], roughness: 0.2, emissive: colors[i % 4], emissiveIntensity: 0.15,
+    }), 0, 0, 0, 8);
+    b.position.copy(c.at(-6.9, -2.6 + i * 0.65)); b.position.y += 1.7 + (i % 2) * 0.55;
+    c.addMesh(b);
+  }
+  // Tables + stools
+  for (const [tx, tz] of [[1.5, -2.5], [4, 1.5], [0.5, 2.8]]) {
+    const table = cylinder(0.75, 0.75, 0.08, MAT.woodPale, 0, 0, 0, 12);
+    table.position.copy(c.at(tx, tz)); table.position.y += 0.85;
+    const leg = cylinder(0.08, 0.1, 0.85, MAT.woodDark, 0, 0, 0, 8);
+    leg.position.copy(c.at(tx, tz)); leg.position.y += 0.42;
+    c.addMesh(table); c.addMesh(leg);
+    c.addCollider(tx, tz, 1.4, 1.4);
+    for (let s = 0; s < 3; s++) {
+      const a = (s / 3) * Math.PI * 2 + tx;
+      const stool = cylinder(0.22, 0.24, 0.55, MAT.woodDark, 0, 0, 0, 8);
+      stool.position.copy(c.at(tx + Math.cos(a) * 1.15, tz + Math.sin(a) * 1.15));
+      stool.position.y += 0.27;
+      c.addMesh(stool);
+    }
+  }
+  // Upright piano against the north wall
+  const piano = box(2, 1.5, 0.7, new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.6 }), 0, 0, 0);
+  piano.position.copy(c.at(3.5, -4.7)); piano.position.y += 0.75;
+  c.addMesh(piano); c.addCollider(3.5, -4.7, 2.2, 1);
+  const keysM = box(1.8, 0.08, 0.25, MAT_I.linen, 0, 0, 0);
+  keysM.position.copy(c.at(3.5, -4.25)); keysM.position.y += 1.0;
+  c.addMesh(keysM);
+}
+
+// --- General store interior ---
+const storeCell = makeInterior({
+  name: 'store', ox: -20, oz: -65, w: 13, d: 10,
+  doorOutside: { x: 13, z: -6.6 }, label: 'the General Store',
+});
+{
+  const c = storeCell;
+  // Counter across the middle-north
+  const counter = box(5, 1.05, 0.9, MAT_I.counter, 0, 0, 0);
+  counter.position.copy(c.at(0, -2.2)); counter.position.y += 0.52;
+  c.addMesh(counter); c.addCollider(0, -2.2, 5.2, 1.1);
+  // Shelf rows with goods
+  for (const sx of [-4.5, 4.5]) {
+    const shelf = box(1, 2, 6, MAT.wood, 0, 0, 0);
+    shelf.position.copy(c.at(sx, 1.2)); shelf.position.y += 1;
+    c.addMesh(shelf); c.addCollider(sx, 1.2, 1.2, 6.2);
+    for (let i = 0; i < 6; i++) {
+      const goods = box(rand(0.25, 0.5), rand(0.2, 0.4), 0.35,
+        new THREE.MeshStandardMaterial({ color: [0x9a6a3a, 0x6a8a5a, 0x8a8a9a][i % 3], roughness: 0.8 }), 0, 0, 0);
+      goods.position.copy(c.at(sx + (Math.random() < 0.5 ? -0.4 : 0.4), -1.3 + i * 1));
+      goods.position.y += 1.1 + (i % 2) * 0.75;
+      c.addMesh(goods);
+    }
+  }
+  // Crates by the door
+  for (const [bx, bz] of [[3.8, 3.4], [4.6, 3.9], [4.2, 3.0]]) {
+    const crate = box(0.8, 0.8, 0.8, MAT.woodPale, 0, 0, 0);
+    crate.position.copy(c.at(bx, bz)); crate.position.y += 0.4;
+    crate.rotation.y = rand(0, 1);
+    c.addMesh(crate);
+  }
+  c.addCollider(4.2, 3.5, 2, 1.6);
+}
+
+// --- Doc Whitley's clinic interior ---
+const clinicCell = makeInterior({
+  name: 'clinic', ox: 20, oz: -65, w: 11, d: 9,
+  doorOutside: { x: 27, z: -7.6 }, label: "Doc Whitley's clinic",
+});
+{
+  const c = clinicCell;
+  // Patient bed
+  const bedFrame = box(1.1, 0.5, 2.4, MAT.woodDark, 0, 0, 0);
+  bedFrame.position.copy(c.at(-3.6, -2)); bedFrame.position.y += 0.25;
+  const mattress = box(1.05, 0.18, 2.3, MAT_I.linen, 0, 0, 0);
+  mattress.position.copy(c.at(-3.6, -2)); mattress.position.y += 0.6;
+  c.addMesh(bedFrame); c.addMesh(mattress); c.addCollider(-3.6, -2, 1.3, 2.6);
+  // Medicine cabinet
+  const cab = box(1.6, 2.2, 0.5, MAT_I.linen, 0, 0, 0);
+  cab.position.copy(c.at(3.8, -3.9)); cab.position.y += 1.1;
+  c.addMesh(cab); c.addCollider(3.8, -3.9, 1.8, 0.7);
+  // Desk + chair
+  const desk = box(1.8, 0.9, 0.9, MAT.wood, 0, 0, 0);
+  desk.position.copy(c.at(2.5, 2.2)); desk.position.y += 0.45;
+  c.addMesh(desk); c.addCollider(2.5, 2.2, 2, 1.1);
+  const chair = box(0.5, 1, 0.5, MAT.woodDark, 0, 0, 0);
+  chair.position.copy(c.at(1.2, 2.2)); chair.position.y += 0.5;
+  c.addMesh(chair);
+}
+
+// ---------------------------------------------------------------------------
 // Particles — small pooled puffs for muzzle smoke, impacts, blood
 // ---------------------------------------------------------------------------
 const particles = [];
@@ -455,13 +690,16 @@ function makePersonMesh(shirtColor, hatColor) {
 }
 
 class NPC {
-  constructor({ name, x, z, shirt, hat = 0x5e452c, hostile = false, lines = [], wanderRadius = 8 }) {
+  constructor({ name, x, z, y = null, shirt, hat = 0x5e452c, hostile = false, lines = [], wanderRadius = 8, stationary = false, facing = null }) {
     this.name = name;
     this.hostile = hostile;
     this.lines = lines;
     this.lineIndex = 0;
     this.hp = hostile ? 30 : 25;
     this.dead = false;
+    this.stationary = stationary;
+    this.dialogueFn = null; // quest/merchant dialogue tree, attached later
+    this.shop = null;       // merchant inventory, attached later
     this.home = new THREE.Vector3(x, 0, z);
     this.target = this.home.clone();
     this.wanderRadius = wanderRadius;
@@ -470,9 +708,11 @@ class NPC {
     this.shootCooldown = rand(0.5, 2);
     this.alerted = false;
     this.deathT = 0;
+    this.baseY = y ?? terrainHeight(x, z);
 
     this.group = makePersonMesh(shirt, hat);
-    this.group.position.set(x, terrainHeight(x, z), z);
+    this.group.position.set(x, this.baseY, z);
+    if (facing !== null) this.group.rotation.y = facing;
     scene.add(this.group);
     this.group.traverse((o) => {
       if (o.isMesh) { o.userData.npc = this; npcHitMeshes.push(o); }
@@ -511,6 +751,7 @@ class NPC {
       player.caps += reward;
       sfx.caps();
       toast(`${this.name} is down. +${reward} caps`);
+      onBanditKilled();
     } else {
       toast(`${this.name} is dead. The town will remember this.`);
     }
@@ -527,9 +768,10 @@ class NPC {
       // Timber.
       this.deathT = Math.min(1, this.deathT + dt * 2.2);
       g.rotation.x = -Math.PI / 2 * this.deathT;
-      g.position.y = terrainHeight(g.position.x, g.position.z) + 0.25 * this.deathT;
+      g.position.y = this.baseY + 0.25 * this.deathT;
       return;
     }
+    if (this.stationary) return; // merchants stand their post
 
     const toPlayer = player.pos.clone().sub(g.position);
     toPlayer.y = 0;
@@ -538,8 +780,8 @@ class NPC {
     let speed = 1.3;
 
     if (this.hostile) {
-      if (!this.alerted && distToPlayer < 26) this.alerted = true;
-      if (this.alerted && !player.dead) {
+      if (!this.alerted && distToPlayer < 26 && !player.cell) this.alerted = true;
+      if (this.alerted && !player.dead && !player.cell) {
         g.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
         if (distToPlayer > 13) {
           const dir = toPlayer.normalize();
@@ -584,6 +826,7 @@ class NPC {
 
     resolveCollisions(g.position, 0.4);
     g.position.y = terrainHeight(g.position.x, g.position.z);
+    this.baseY = g.position.y;
 
     // Walk cycle
     const limbs = g.userData.limbs;
@@ -627,7 +870,9 @@ npcs.push(new NPC({
   ],
 }));
 npcs.push(new NPC({
-  name: 'Barkeep Sal', x: -16, z: -5, shirt: 0x8a2f2f, wanderRadius: 4,
+  name: 'Barkeep Sal',
+  x: saloonCell.at(-4.6, 0).x, z: saloonCell.at(-4.6, 0).z, y: FLOOR_Y,
+  stationary: true, facing: Math.PI / 2, shirt: 0x8a2f2f,
   lines: [
     "Welcome to the Prospector. We got whiskey, warm beer, and water that's only a little radioactive.",
     "A courier came through last week. Took two in the head out by the ridge and kept walking. Swear on my still.",
@@ -635,11 +880,21 @@ npcs.push(new NPC({
   ],
 }));
 npcs.push(new NPC({
-  name: 'Doc Whitley', x: 27, z: -7, shirt: 0xd8d2c0, hat: 0x777777, wanderRadius: 5,
+  name: 'Doc Whitley',
+  x: clinicCell.at(0.8, 0.6).x, z: clinicCell.at(0.8, 0.6).z, y: FLOOR_Y,
+  stationary: true, facing: 0, shirt: 0xd8d2c0, hat: 0x777777,
   lines: [
     "You look like you've been chewed up by a bighorner. Sit still and let me look at you.",
     "Rest a while and you'll heal up on your own. Clean living, that's my prescription.",
     "The Viper boys put two of my patients in the ground this month. Wouldn't lose sleep if they had an accident.",
+  ],
+}));
+npcs.push(new NPC({
+  name: 'Trader Rosa',
+  x: storeCell.at(0, -3.4).x, z: storeCell.at(0, -3.4).z, y: FLOOR_Y,
+  stationary: true, facing: 0, shirt: 0x7a4a6a, hat: 0x3a2a1a,
+  lines: [
+    "Everything's for sale, stranger. Ammunition, supplies, and my winning personality — that last one's free.",
   ],
 }));
 npcs.push(new NPC({
@@ -875,7 +1130,7 @@ function startReload() {
 const raycaster = new THREE.Raycaster();
 function fire() {
   const w = weapons[currentWeapon];
-  if (fireCooldown > 0 || reloading > 0 || player.dead || dialogueNPC) return;
+  if (fireCooldown > 0 || reloading > 0 || player.dead || dialogueNPC || shopNPC || questLogOpen) return;
   if (w.mag <= 0) { sfx.dry(); startReload(); return; }
   w.mag--;
   fireCooldown = w.fireDelay;
@@ -913,6 +1168,243 @@ function fire() {
 }
 
 // ---------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------
+const quests = {
+  viper: { name: 'Cull the Vipers', stage: 0 },      // 0 unknown, 1 active, 2 turn-in, 3 done
+  delivery: { name: "The Doc's Rounds", stage: 0 },  // 0 unknown, 1 carrying, 3 done
+  pickaxe: { name: "Jeb's Lucky Pickaxe", stage: 0 },// 0 unknown, 1 searching, 2 carrying, 3 done
+};
+function banditsLeft() { return npcs.filter((n) => n.hostile && !n.dead).length; }
+
+function questObjectiveText(id) {
+  const q = quests[id];
+  if (id === 'viper') return q.stage === 1 ? `Kill the Viper Gang (${5 - banditsLeft()}/5)` : 'Collect your bounty from Sheriff Vance';
+  if (id === 'delivery') return "Deliver Doc's satchel to Widow Calloway, by the bank";
+  if (id === 'pickaxe') return q.stage === 1 ? 'Find the pickaxe at the stone cairn west of town' : 'Return the pickaxe to Prospector Jeb';
+  return '';
+}
+function updateTracker() {
+  const parts = [];
+  for (const id in quests) {
+    const q = quests[id];
+    if (q.stage === 1 || q.stage === 2) {
+      parts.push(`<div class="q">&#10022; ${q.name}<br>&nbsp;&nbsp;${questObjectiveText(id)}</div>`);
+    }
+  }
+  ui.tracker.innerHTML = parts.join('');
+}
+let questLogOpen = false;
+function renderQuestLog() {
+  ui.questRows.innerHTML = '';
+  let any = false;
+  for (const id in quests) {
+    const q = quests[id];
+    if (q.stage === 0) continue;
+    any = true;
+    const div = document.createElement('div');
+    div.className = 'quest' + (q.stage === 3 ? ' done' : '');
+    div.innerHTML = `&#10022; ${q.name}` + (q.stage === 3 ? ' &mdash; completed' : `<div class="obj">${questObjectiveText(id)}</div>`);
+    ui.questRows.appendChild(div);
+  }
+  if (!any) ui.questRows.innerHTML = '<div class="quest" style="opacity:.6">No quests yet. Folks around town could use a hand.</div>';
+}
+function toggleQuestLog() {
+  questLogOpen = !questLogOpen;
+  if (questLogOpen) renderQuestLog();
+  ui.questLog.style.display = questLogOpen ? 'block' : 'none';
+}
+function startQuest(q) { q.stage = 1; toast(`Quest started: ${q.name}`); updateTracker(); }
+function completeQuest(q, extra = '') { q.stage = 3; sfx.caps(); toast(`Quest completed: ${q.name}${extra ? ' — ' + extra : ''}`); updateTracker(); updateHUD(); }
+function onBanditKilled() {
+  const q = quests.viper;
+  if (q.stage === 1 && banditsLeft() === 0) {
+    q.stage = 2;
+    toast('Quest updated: return to Sheriff Vance');
+  }
+  updateTracker();
+}
+
+// Jeb's pickaxe: a stone cairn out west with the prop leaning against it
+{
+  const px = -110, pz = -35;
+  const py = terrainHeight(px, pz);
+  for (let i = 0; i < 3; i++) {
+    const s = 1.6 - i * 0.45;
+    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), MAT.rock);
+    stone.position.set(px, py + 0.6 + i * 1.05, pz);
+    stone.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3));
+    stone.castShadow = stone.receiveShadow = true;
+    scene.add(stone);
+    worldMeshes.push(stone);
+  }
+  colliders.push({ minX: px - 1.6, maxX: px + 1.6, minZ: pz - 1.6, maxZ: pz + 1.6 });
+  const pickaxe = new THREE.Group();
+  const handle = cylinder(0.05, 0.06, 1.3, MAT.woodPale, 0, 0.65, 0, 6);
+  const head = box(0.9, 0.1, 0.12, MAT.darkMetal, 0, 1.25, 0);
+  pickaxe.add(handle, head);
+  pickaxe.position.set(px + 1.9, py, pz + 0.6);
+  pickaxe.rotation.z = 0.5;
+  scene.add(pickaxe);
+  interactables.push({
+    pos: () => pickaxe.position,
+    radius: 2.6,
+    label: () => (quests.pickaxe.stage === 1 && pickaxe.visible ? "Take Jeb's lucky pickaxe" : null),
+    action: () => {
+      pickaxe.visible = false;
+      quests.pickaxe.stage = 2;
+      toast('Quest updated: return the pickaxe to Jeb');
+      updateTracker();
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Merchants
+// ---------------------------------------------------------------------------
+let shopNPC = null;
+function openShop(npc) {
+  endDialogue();
+  shopNPC = npc;
+  renderShop();
+  ui.shop.style.display = 'block';
+}
+function renderShop() {
+  ui.shopName.textContent = `${shopNPC.name.toUpperCase()} — GOODS FOR SALE`;
+  ui.shopCaps.textContent = player.caps;
+  ui.shopRows.innerHTML = '';
+  shopNPC.shop.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    if (item.soldOut) row.style.opacity = 0.35;
+    row.innerHTML =
+      `<span>[${i + 1}] ${item.name}${item.soldOut ? ' (sold)' : ''} &nbsp;<span class="desc">${item.desc}</span></span>` +
+      `<span>${item.price} caps</span>`;
+    ui.shopRows.appendChild(row);
+  });
+}
+function buyItem(i) {
+  const item = shopNPC && shopNPC.shop[i];
+  if (!item || item.soldOut) return;
+  if (player.caps < item.price) { toast('Not enough caps.'); sfx.dry(); return; }
+  player.caps -= item.price;
+  item.effect();
+  if (item.once) item.soldOut = true;
+  sfx.caps();
+  toast(`Bought ${item.name}.`);
+  updateHUD();
+  renderShop();
+}
+function closeShop() { shopNPC = null; ui.shop.style.display = 'none'; }
+
+function healPlayer(n) { player.hp = Math.min(player.maxHp, player.hp + n); updateHUD(); }
+function useStim() {
+  if (player.dead) return;
+  if (player.stims <= 0) { toast('No stimpaks. Doc Whitley and the store sell them.'); return; }
+  if (player.hp >= player.maxHp) { toast('Already at full health.'); return; }
+  player.stims--;
+  healPlayer(40);
+  sfx.reload();
+  toast('Stimpak used.');
+}
+
+// ---------------------------------------------------------------------------
+// Dialogue trees & shop inventories
+// ---------------------------------------------------------------------------
+function npcByName(part) { return npcs.find((n) => n.name.includes(part)); }
+const tradeOption = (npc, label = "Let's trade.") => ({ label, action: () => { openShop(npc); return 'shop'; } });
+const flavorNode = (npc, extraOptions = null) => {
+  const node = { text: npc.lines[npc.lineIndex++ % npc.lines.length] };
+  if (extraOptions) node.options = extraOptions;
+  return node;
+};
+
+npcByName('Sheriff').dialogueFn = (npc) => {
+  const q = quests.viper;
+  if (q.stage === 0) return {
+    text: "Viper Gang's dug in east of town, past the water tower. They've been bleeding us dry — stagecoaches, brahmin, one of my deputies. I can't leave the town unwatched, but you look capable. There's a bounty in it.",
+    options: [
+      { label: "I'll clear out that camp for you.", action: () => { startQuest(q); if (banditsLeft() === 0) { q.stage = 2; toast('Quest updated: collect your bounty'); updateTracker(); } } },
+      { label: 'Not my fight, Sheriff.', action: () => 'close' },
+    ],
+  };
+  if (q.stage === 1) return {
+    text: `Five of them, camped around a fire east past the water tower. ${5 - banditsLeft()} down so far. Watch yourself — they shoot first and don't bother with questions.`,
+  };
+  if (q.stage === 2) return {
+    text: "The gunfire's stopped and the buzzards are circling east. The whole camp, by yourself? Well, I'll be. Town owes you.",
+    options: [{ label: 'Collect the bounty.', action: () => { player.caps += 100; completeQuest(q, '+100 caps'); return 'rerender'; } }],
+  };
+  return flavorNode(npc);
+};
+
+npcByName('Doc Whitley').dialogueFn = (npc) => {
+  const q = quests.delivery;
+  if (q.stage === 0) return {
+    text: "Widow Calloway's heart pills are sitting right here and my waiting room's full of fools who lost fights with cazadores. Run this satchel over to her? She keeps to the south side, by the bank.",
+    options: [
+      { label: "I'll take it to her.", action: () => startQuest(q) },
+      tradeOption(npc, 'What do you have for sale?'),
+      { label: 'Another time, Doc.', action: () => 'close' },
+    ],
+  };
+  if (q.stage === 1) return {
+    text: "That satchel goes to Widow Calloway, south side by the bank. Pills don't do a lick of good in your pocket.",
+    options: [tradeOption(npc, 'What do you have for sale?')],
+  };
+  return flavorNode(npc, [tradeOption(npc, 'What do you have for sale?')]);
+};
+
+npcByName('Calloway').dialogueFn = (npc) => {
+  const q = quests.delivery;
+  if (q.stage === 1) return {
+    text: "Is that satchel from Doc Whitley? Bless your heart, child. Mine's been fluttering like a radroach in a lampshade.",
+    options: [{ label: 'Hand over the satchel.', action: () => { player.caps += 25; completeQuest(q, '+25 caps'); return 'rerender'; } }],
+  };
+  if (q.stage === 3 && !npc._thanked) {
+    npc._thanked = true;
+    return { text: 'I can breathe easy again thanks to you. Doc Whitley chose his courier well.' };
+  }
+  return flavorNode(npc);
+};
+
+npcByName('Jeb').dialogueFn = (npc) => {
+  const q = quests.pickaxe;
+  if (q.stage === 0) return {
+    text: "My lucky pickaxe! Left her leaning on the stone cairn out west when coyotes ran me off my claim. Can't strike it rich swinging my boot heel. Fetch her back and I'll make it worth your while.",
+    options: [
+      { label: "I'll keep an eye out for it.", action: () => startQuest(q) },
+      { label: "Buy a new one at the store.", action: () => 'close' },
+    ],
+  };
+  if (q.stage === 1) return { text: 'West of town, big stack of stones — you can see it from the church. Watch for coyotes. And vipers. And, well, everything.' };
+  if (q.stage === 2) return {
+    text: "That's her! Ain't she a beauty? Here — I was saving these caps for a rainy day, but it don't rain no more.",
+    options: [{ label: 'Return the pickaxe.', action: () => { player.caps += 40; completeQuest(q, '+40 caps'); return 'rerender'; } }],
+  };
+  return flavorNode(npc);
+};
+
+npcByName('Sal').dialogueFn = (npc) => flavorNode(npc, [tradeOption(npc, "Let's see what's behind the bar.")]);
+npcByName('Rosa').dialogueFn = (npc) => flavorNode(npc, [tradeOption(npc, 'Show me your stock.')]);
+
+npcByName('Sal').shop = [
+  { name: 'Whiskey', price: 12, desc: 'restores 25 HP', effect: () => healPlayer(25) },
+  { name: 'Brahmin steak', price: 22, desc: 'restores 50 HP', effect: () => healPlayer(50) },
+  { name: 'Stimpak', price: 25, desc: '+1 stimpak, use with [H]', effect: () => { player.stims++; } },
+];
+npcByName('Rosa').shop = [
+  { name: '.357 rounds ×12', price: 10, desc: 'revolver ammo', effect: () => { weapons[0].reserve += 12; updateAmmoHUD(); } },
+  { name: 'Rifle rounds ×7', price: 12, desc: 'repeater ammo', effect: () => { weapons[1].reserve += 7; updateAmmoHUD(); } },
+  { name: 'Stimpak', price: 22, desc: '+1 stimpak, use with [H]', effect: () => { player.stims++; } },
+  { name: 'Lucky rancher hat', price: 60, desc: '+20 max HP, one per customer', once: true, effect: () => { player.maxHp += 20; healPlayer(20); } },
+];
+npcByName('Doc Whitley').shop = [
+  { name: 'Stimpak', price: 18, desc: '+1 stimpak, use with [H]', effect: () => { player.stims++; } },
+  { name: 'Full patch-up', price: 40, desc: 'restores all HP', effect: () => healPlayer(999) },
+];
+
+// ---------------------------------------------------------------------------
 // Player
 // ---------------------------------------------------------------------------
 const player = {
@@ -922,8 +1414,10 @@ const player = {
   pitch: 0,
   hp: 100, maxHp: 100,
   caps: 25,
+  stims: 1,
   onGround: true,
   mounted: null,
+  cell: null, // interior cell we're standing in, or null for the open world
   dead: false,
   respawnT: 0,
 };
@@ -934,6 +1428,9 @@ const keys = {};
 
 function resolveCollisions(pos, radius) {
   for (const c of colliders) {
+    // Colliders without a y-range are surface-only; skip them underground (in cells)
+    if (c.minY === undefined) { if (pos.y < -10) continue; }
+    else if (pos.y < c.minY || pos.y > c.maxY) continue;
     const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
     const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
     const dx = pos.x - cx, dz = pos.z - cz;
@@ -968,6 +1465,7 @@ function damagePlayer(amount) {
 
 function respawn() {
   player.dead = false;
+  player.cell = null;
   player.hp = player.maxHp;
   player.pos.set(0, 0, 40);
   player.vel.set(0, 0, 0);
@@ -1032,10 +1530,10 @@ function updatePlayer(dt) {
   } else {
     const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
     const speed = sprint ? 8.5 : 4.8;
-    const groundY = terrainHeight(player.pos.x, player.pos.z);
 
     player.pos.addScaledVector(input, speed * dt);
     resolveCollisions(player.pos, 0.45);
+    const groundY = groundHeightAt(player.pos.x, player.pos.z, player.pos.y);
 
     // Gravity / jump
     if (player.onGround && keys['Space']) {
@@ -1045,8 +1543,8 @@ function updatePlayer(dt) {
     if (!player.onGround) {
       player.vel.y -= 14 * dt;
       player.pos.y += player.vel.y * dt;
-      if (player.pos.y <= terrainHeight(player.pos.x, player.pos.z)) {
-        player.pos.y = terrainHeight(player.pos.x, player.pos.z);
+      if (player.pos.y <= groundY) {
+        player.pos.y = groundY;
         player.vel.y = 0;
         player.onGround = true;
       }
@@ -1091,6 +1589,7 @@ function updatePlayer(dt) {
 // Interaction & dialogue
 // ---------------------------------------------------------------------------
 let dialogueNPC = null;
+let currentNode = null;
 let nearestInteractable = null;
 
 function findInteractable() {
@@ -1105,7 +1604,7 @@ function findInteractable() {
       nearestInteractable = it;
     }
   }
-  if (nearestInteractable && !dialogueNPC && !player.dead) {
+  if (nearestInteractable && !dialogueNPC && !shopNPC && !questLogOpen && !player.dead) {
     ui.prompt.textContent = `[E] ${nearestInteractable.label()}`;
     ui.prompt.style.display = 'block';
   } else {
@@ -1117,26 +1616,51 @@ function startDialogue(npc) {
   if (npc.dead || npc.alerted) return;
   dialogueNPC = npc;
   sfx.talk();
-  showDialogueLine();
+  renderDialogue();
 }
-function showDialogueLine() {
+function renderDialogue() {
   const npc = dialogueNPC;
+  currentNode = npc.dialogueFn
+    ? npc.dialogueFn(npc)
+    : { text: npc.lines[npc.lineIndex % npc.lines.length] };
   ui.dlgName.textContent = npc.name;
-  ui.dlgText.textContent = npc.lines[npc.lineIndex % npc.lines.length];
+  ui.dlgText.textContent = currentNode.text;
+  ui.dlgOptions.innerHTML = '';
+  if (currentNode.options) {
+    currentNode.options.forEach((o, i) => {
+      const div = document.createElement('div');
+      div.textContent = `[${i + 1}] ${o.label}`;
+      ui.dlgOptions.appendChild(div);
+    });
+    ui.dlgHint.textContent = '[1-9] choose  /  [Q] leave';
+  } else {
+    ui.dlgHint.textContent = '[E] continue  /  [Q] leave';
+  }
   ui.dialogue.style.display = 'block';
+}
+function chooseOption(i) {
+  const opt = currentNode && currentNode.options && currentNode.options[i];
+  if (!opt) return;
+  sfx.talk();
+  const result = opt.action();
+  if (result === 'close') endDialogue();
+  else if (dialogueNPC) renderDialogue(); // 'shop' already closed the dialogue
 }
 function advanceDialogue() {
   const npc = dialogueNPC;
+  if (currentNode && currentNode.options) return; // must pick an option
+  if (npc.dialogueFn) { endDialogue(); return; }  // tree nodes without options close on E
   npc.lineIndex++;
   if (npc.lineIndex % npc.lines.length === 0) {
     endDialogue();
   } else {
     sfx.talk();
-    showDialogueLine();
+    renderDialogue();
   }
 }
 function endDialogue() {
   dialogueNPC = null;
+  currentNode = null;
   ui.dialogue.style.display = 'none';
 }
 
@@ -1166,12 +1690,25 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (!locked) return;
+  const digit = e.code.startsWith('Digit') ? parseInt(e.code.slice(5), 10) : null;
+  if (shopNPC) {
+    if (digit) buyItem(digit - 1);
+    else if (e.code === 'KeyQ' || e.code === 'KeyE') closeShop();
+    return;
+  }
+  if (dialogueNPC) {
+    if (digit) chooseOption(digit - 1);
+    else if (e.code === 'KeyE') advanceDialogue();
+    else if (e.code === 'KeyQ') endDialogue();
+    return;
+  }
+  if (questLogOpen && e.code !== 'KeyJ') return;
+  if (e.code === 'KeyJ') toggleQuestLog();
+  if (e.code === 'KeyH') useStim();
   if (e.code === 'KeyE') {
-    if (dialogueNPC) advanceDialogue();
-    else if (player.mounted) dismount();
+    if (player.mounted) dismount();
     else if (nearestInteractable) nearestInteractable.action();
   }
-  if (e.code === 'KeyQ' && dialogueNPC) endDialogue();
   if (e.code === 'KeyR') startReload();
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
@@ -1185,6 +1722,7 @@ function updateHUD() {
   ui.hpNum.textContent = Math.ceil(player.hp);
   ui.hpBar.style.width = `${(player.hp / player.maxHp) * 100}%`;
   ui.caps.textContent = player.caps;
+  ui.stims.textContent = player.stims;
 }
 
 // Compass strip: repeated cardinal marks, offset by yaw
@@ -1230,7 +1768,7 @@ function tick() {
 }
 
 // Debug/testing handle
-window.__game = { player, npcs, horses, weapons };
+window.__game = { player, npcs, horses, weapons, quests, cells, enterCell, exitCell };
 
 // Aim the camera before the first frame so the title screen has a nice backdrop
 camera.position.set(player.pos.x, EYE_WALK, player.pos.z);

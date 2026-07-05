@@ -68,6 +68,43 @@
   }
   #dialogue .name { font-weight: bold; margin-bottom: 6px; border-bottom: 1px solid var(--amber-faint); padding-bottom: 4px; }
   #dialogue .hint { font-size: 11px; opacity: 0.65; margin-top: 8px; text-align: right; }
+  #dlg-options { margin-top: 10px; }
+  #dlg-options div { padding: 3px 0; opacity: 0.95; }
+
+  #shop {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(560px, 84vw); padding: 16px 22px;
+    background: rgba(10,10,8,0.9); border: 1px solid var(--amber);
+    display: none;
+  }
+  #shop .name { font-weight: bold; border-bottom: 1px solid var(--amber-faint); padding-bottom: 6px; margin-bottom: 10px; }
+  #shop .row { display: flex; justify-content: space-between; padding: 5px 0; }
+  #shop .row .desc { opacity: 0.6; font-size: 12px; }
+  #shop .hint { font-size: 11px; opacity: 0.65; margin-top: 10px; text-align: right; }
+
+  #quest-log {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(560px, 84vw); padding: 16px 22px;
+    background: rgba(10,10,8,0.9); border: 1px solid var(--amber);
+    display: none;
+  }
+  #quest-log .name { font-weight: bold; border-bottom: 1px solid var(--amber-faint); padding-bottom: 6px; margin-bottom: 10px; }
+  #quest-log .quest { padding: 6px 0; }
+  #quest-log .quest .obj { opacity: 0.7; font-size: 12px; padding-left: 14px; }
+  #quest-log .done { opacity: 0.45; text-decoration: line-through; }
+  #quest-log .hint { font-size: 11px; opacity: 0.65; margin-top: 10px; text-align: right; }
+
+  #tracker {
+    position: absolute; left: 24px; top: 24px; max-width: 320px;
+    font-size: 13px; line-height: 1.5; text-shadow: 0 0 6px rgba(255,182,66,0.6);
+  }
+  #tracker .q { background: rgba(10,10,8,0.5); border-left: 2px solid var(--amber); padding: 4px 10px; margin-bottom: 6px; }
+
+  #fade {
+    position: fixed; inset: 0; background: #000; opacity: 0;
+    pointer-events: none; transition: opacity 0.22s; z-index: 5;
+  }
+  #stim-line { font-size: 11px; opacity: 0.8; margin-top: 5px; }
 
   #toast {
     position: absolute; left: 50%; top: 64px; transform: translateX(-50%);
@@ -118,7 +155,10 @@
     <div class="label">HP</div>
     <div class="big" id="hp-num">100</div>
     <div class="bar"><div id="hp-bar"></div></div>
+    <div id="stim-line">STIMPAKS &times; <span id="stim-num">1</span> &nbsp;[H]</div>
   </div>
+
+  <div id="tracker"></div>
 
   <div id="ammo-panel" class="panel">
     <div class="label" id="weapon-name">.357 REVOLVER</div>
@@ -134,9 +174,21 @@
   <div id="dialogue">
     <div class="name" id="dlg-name"></div>
     <div id="dlg-text"></div>
-    <div class="hint">[E] continue &nbsp;/&nbsp; [Q] leave</div>
+    <div id="dlg-options"></div>
+    <div class="hint" id="dlg-hint">[E] continue &nbsp;/&nbsp; [Q] leave</div>
+  </div>
+  <div id="shop">
+    <div class="name" id="shop-name"></div>
+    <div id="shop-rows"></div>
+    <div class="hint">[1-9] buy &nbsp;/&nbsp; [Q] leave &nbsp;&mdash;&nbsp; caps: <span id="shop-caps"></span></div>
+  </div>
+  <div id="quest-log">
+    <div class="name">QUESTS</div>
+    <div id="quest-rows"></div>
+    <div class="hint">[J] close</div>
   </div>
   <div id="toast"></div>
+  <div id="fade"></div>
   <div id="damage-vignette"></div>
   <div id="death-screen"><h1>YOU DIED</h1><div>The desert keeps what it takes.</div></div>
 </div>
@@ -148,7 +200,8 @@
     <div><kbd>W A S D</kbd> move &nbsp;&nbsp;<kbd>SHIFT</kbd> sprint &nbsp;&nbsp;<kbd>SPACE</kbd> jump</div>
     <div><kbd>MOUSE</kbd> look &nbsp;&nbsp;<kbd>LMB</kbd> shoot &nbsp;&nbsp;<kbd>R</kbd> reload</div>
     <div><kbd>1</kbd> revolver &nbsp;&nbsp;<kbd>2</kbd> repeater rifle</div>
-    <div><kbd>E</kbd> talk / mount &amp; dismount horse</div>
+    <div><kbd>E</kbd> talk / trade / enter buildings / ride horses</div>
+    <div><kbd>J</kbd> quest log &nbsp;&nbsp;<kbd>H</kbd> use stimpak</div>
     <div><kbd>ESC</kbd> release mouse</div>
   </div>
   <div class="start">[ CLICK TO ENTER THE MOJAVE ]</div>
