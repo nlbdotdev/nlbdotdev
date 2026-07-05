@@ -317,7 +317,83 @@ M1's relay server (one small Node file, ~100 lines to start).
 
 ---
 
-## 8. Open questions (deliberately unresolved)
+## 8. Platform & topology direction (revised)
+
+Decision after review: this is best served as an **MMO-lite**, and the
+prototype's engine has done its job.
+
+### Server topology
+
+- **Instanced lobby zones (12-24 players):** towns and PvE zones. Dusty
+  Gulch is a social/quest hub instance; PvE wilderness and story content
+  runs in crew-scaled instances inside it.
+- **Global (per-server/shard) PvP zones:** the contested railway corridors.
+  Territory-war over the line — who lays it, who holds it, who cuts it —
+  happens here, faction vs. faction.
+- Existence proof for the core loop: **Foxhole** — collectively built
+  logistics infrastructure under PvP pressure is a proven, beloved loop,
+  and its railroads are the closest thing to our thesis already live.
+- Design consequence to resolve later: the Charter/junction-vote design in
+  §4 was authored for a 4-player crew. At MMO scale it likely becomes
+  per-crew stakes *within* factions, and junctions become server-wide
+  faction objectives (vote → contribution war). Parked until gameplay is
+  crisp.
+- The expensive, deferred part is not the zones — it's the backend
+  (persistence DB, gateway/auth, instance orchestration). None of that is
+  needed for the gameplay-first phase.
+
+### Engine
+
+**Move to Unity 6 (URP).** Reasoning:
+
+- Three.js was the right tool to answer design questions for near-zero cost,
+  and it did. It is the wrong tool for "crisp AA": no animation rigging
+  pipeline, no profiler-grade optimization story, hand-rolled netcode
+  forever, no console path.
+- **Unity over Unreal** for this team-size and genre: C# iteration speed,
+  mature kinematic character/FPS tooling, and a netcode ecosystem that fits
+  the topology (**FishNet** or Mirror for self-hosted instanced servers with
+  client-side prediction; Photon Fusion if managed hosting is preferred
+  later). URP handles the stylized Long Dusk look cheaply.
+- The honest Unreal counterpoint: Lyra + GAS + built-in replication buys
+  AAA-feel gunplay fastest out of the box. If the team were 5+ with C++
+  experience, Unreal would win. For one-to-few developers, Unity's
+  iteration loop wins the "get to fun faster" race.
+- Godot: not yet, for this — 3D + netcode maturity isn't there for AA feel.
+
+### What "crisp AA gameplay" decomposes into (the actual next work)
+
+Gunfeel is a stack, and the prototype only has the bottom layer (hitscan +
+numbers). The Unity slice needs, in priority order:
+
+1. **Camera & controller:** acceleration curves, sprint FOV kick, landing
+   dip, ADS transitions — a kinematic controller tuned like Apex/Destiny,
+   not a physics capsule.
+2. **Animation-driven viewmodels:** idle sway, walk cycles, reload anims
+   with keyframed weight, procedural recoil layered on top. This is 60% of
+   "AA feel."
+3. **Recoil patterns + spread bloom** per weapon, tuned as data.
+4. **Hit feedback stack:** hitmarkers, damage numbers (toggle), hit
+   reactions/stagger on NPCs, kill confirms. Dismemberment carries over —
+   it reads even better with real skinned meshes.
+5. **Sound layers:** mechanical foley + shot tail per environment (canyon
+   echo vs. interior slap). Procedural audio retires; recorded assets in.
+6. **TTK model:** port the prototype's tuning (it's already play-validated:
+   30 HP bandits, 12/20/8×6 damage) as the starting spreadsheet.
+
+### Migration plan
+
+- **Slice 0 (offline, no netcode):** one gray-box canyon + one town block,
+  one revolver + the shotgun, five bandits. Goal: it feels better than the
+  prototype in every way that matters. Nothing else.
+- **Slice 1:** FishNet, 4-8 players in that same map, host-authoritative →
+  dedicated server build. Prove shooting each other feels right.
+- **Slice 2:** first railway segment as a PvP objective between two teams.
+- The Three.js prototype is retired to **reference implementation**: quest
+  data, dialogue trees, faction/lore bible (§2-3), and tuning values port
+  forward; the renderer does not.
+
+## 9. Open questions (deliberately unresolved)
 
 1. **Session model** — persistent host world (Valheim-style) vs. campaign
    lobbies (Deep Rock-style)? Leaning persistent-host: the railroad *is* the
