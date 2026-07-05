@@ -13,7 +13,7 @@ const ui = {
   title: $('title-screen'),
   hpNum: $('hp-num'), hpBar: $('hp-bar'),
   ammoMag: $('ammo-mag'), ammoReserve: $('ammo-reserve'), weaponName: $('weapon-name'),
-  caps: $('caps-num'), stims: $('stim-num'),
+  caps: $('caps-num'), stims: $('stim-num'), lvl: $('lvl-num'), xpBar: $('xp-bar'),
   prompt: $('prompt'),
   dialogue: $('dialogue'), dlgName: $('dlg-name'), dlgText: $('dlg-text'),
   dlgOptions: $('dlg-options'), dlgHint: $('dlg-hint'),
@@ -73,6 +73,7 @@ function playTone({ freq = 220, duration = 0.1, gain = 0.2, shape = 'square' }) 
 }
 const sfx = {
   shot: () => { playNoise({ duration: 0.22, freq: 700, gain: 0.55 }); playTone({ freq: 90, duration: 0.12, gain: 0.25, shape: 'triangle' }); },
+  boom: () => { playNoise({ duration: 0.35, freq: 420, gain: 0.8 }); playTone({ freq: 55, duration: 0.22, gain: 0.35, shape: 'triangle' }); },
   distantShot: () => playNoise({ duration: 0.18, freq: 400, gain: 0.18 }),
   reload: () => { playTone({ freq: 500, duration: 0.05, gain: 0.12 }); setTimeout(() => playTone({ freq: 700, duration: 0.05, gain: 0.12 }), 120); },
   dry: () => playTone({ freq: 300, duration: 0.06, gain: 0.15 }),
@@ -661,6 +662,60 @@ function updateTracers(dt) {
   }
 }
 
+// Gibs — dismembered parts tumbling with cheap physics, left where they land
+const gibs = [];
+function dismember(group, names, hitPoint) {
+  const parts = group.userData.parts || {};
+  for (const n of names) {
+    const part = parts[n];
+    if (!part || part.userData.gibbed) continue;
+    part.userData.gibbed = true;
+    // Stop the part being shootable/counted
+    part.traverse((o) => {
+      const i = npcHitMeshes.indexOf(o);
+      if (i >= 0) npcHitMeshes.splice(i, 1);
+    });
+    const worldPos = part.getWorldPosition(new THREE.Vector3());
+    scene.attach(part); // reparent, preserving world transform
+    const away = hitPoint ? worldPos.clone().sub(hitPoint) : new THREE.Vector3(rand(-1, 1), 0, rand(-1, 1));
+    away.y = 0;
+    if (away.lengthSq() < 0.01) away.set(rand(-1, 1), 0, rand(-1, 1));
+    away.normalize().multiplyScalar(rand(1.5, 4));
+    away.y = rand(2.5, 5);
+    gibs.push({
+      mesh: part,
+      vel: away,
+      angVel: new THREE.Vector3(rand(-9, 9), rand(-9, 9), rand(-9, 9)),
+      rest: false,
+    });
+    spawnPuff(worldPos, 0x8a1a10, 0.09, 9, 2.6, 0.55);
+  }
+  if (names.length) sfx.hit();
+}
+function updateGibs(dt) {
+  for (const g of gibs) {
+    if (g.rest) continue;
+    g.vel.y -= 13 * dt;
+    g.mesh.position.addScaledVector(g.vel, dt);
+    g.mesh.rotation.x += g.angVel.x * dt;
+    g.mesh.rotation.y += g.angVel.y * dt;
+    g.mesh.rotation.z += g.angVel.z * dt;
+    const groundY = groundHeightAt(g.mesh.position.x, g.mesh.position.z, g.mesh.position.y) + 0.1;
+    if (g.mesh.position.y <= groundY) {
+      g.mesh.position.y = groundY;
+      if (g.vel.y < -2.5) { // one soft bounce
+        g.vel.y *= -0.35;
+        g.vel.x *= 0.5;
+        g.vel.z *= 0.5;
+        g.angVel.multiplyScalar(0.5);
+      } else {
+        g.rest = true;
+      }
+    }
+  }
+  while (gibs.length > 36) scene.remove(gibs.shift().mesh); // keep the street from becoming a charnel house
+}
+
 // ---------------------------------------------------------------------------
 // NPCs
 // ---------------------------------------------------------------------------
@@ -676,6 +731,7 @@ function makePersonMesh(shirtColor, hatColor) {
   const torso = box(0.55, 0.7, 0.32, shirt, 0, 1.15, 0);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), SKIN);
   head.position.y = 1.72; head.castShadow = true;
+  head.userData.bodyPart = 'head';
   const hat = new THREE.Group();
   const brim = cylinder(0.32, 0.32, 0.04, new THREE.MeshStandardMaterial({ color: hatColor, roughness: 1 }), 0, 1.86, 0, 12);
   const top = cylinder(0.16, 0.18, 0.22, brim.material, 0, 1.97, 0, 10);
@@ -686,6 +742,7 @@ function makePersonMesh(shirtColor, hatColor) {
   const armR = box(0.14, 0.6, 0.16, shirt, 0.36, 1.15, 0);
   g.add(torso, head, hat, legL, legR, armL, armR);
   g.userData.limbs = { legL, legR, armL, armR };
+  g.userData.parts = { head, hat, armL, armR, legL, legR };
   return g;
 }
 
@@ -733,24 +790,38 @@ class NPC {
     }
   }
 
-  damage(amount, hitPoint) {
+  damage(amount, hitPoint, opts = {}) {
     if (this.dead) return;
+    if (opts.part === 'head') amount *= 2; // headshot crit
     this.hp -= amount;
     spawnPuff(hitPoint, 0x8a1a10, 0.07, 6, 2.2, 0.4);
-    if (!this.hostile) this.alerted = true; // civilians flee when shot
-    if (this.hostile) this.alerted = true;
-    if (this.hp <= 0) this.die();
+    this.alerted = true; // hostiles engage, civilians flee
+    if (this.hp <= 0) this.die({ ...opts, hitPoint, overkill: -this.hp });
     else if (this.hostile) alertBandits();
   }
 
-  die() {
+  die(opts = {}) {
     this.dead = true;
     this.deathT = 0;
+    this.baseY = this.group.position.y;
+    // Dismemberment: headshot kills pop the head; heavy overkill (or a face
+    // full of buckshot) takes limbs with it.
+    const parts = [];
+    if (opts.part === 'head') parts.push('head', 'hat');
+    const gibChance = (opts.overkill || 0) * 0.035 + (opts.force || 0) * 0.45;
+    if (Math.random() < gibChance) {
+      const limbs = ['armL', 'armR', 'legL', 'legR'];
+      const n = 1 + Math.floor(Math.random() * 2) + (opts.force ? 1 : 0);
+      for (let i = 0; i < n; i++) parts.push(limbs.splice(Math.floor(Math.random() * limbs.length), 1)[0]);
+      if (opts.force && Math.random() < 0.4) parts.push('head', 'hat');
+    }
+    dismember(this.group, parts, opts.hitPoint);
     if (this.hostile) {
       const reward = 8 + Math.floor(Math.random() * 12);
       player.caps += reward;
       sfx.caps();
-      toast(`${this.name} is down. +${reward} caps`);
+      toast(`${this.name} is down. +${reward} caps, +30 XP`);
+      addXP(30);
       onBanditKilled();
     } else {
       toast(`${this.name} is dead. The town will remember this.`);
@@ -1057,6 +1128,139 @@ function dismount() {
 }
 
 // ---------------------------------------------------------------------------
+// Wildlife — coyotes prowl the dunes and bite anything that smells like caps
+// ---------------------------------------------------------------------------
+const critters = [];
+
+class Coyote {
+  constructor(x, z) {
+    this.name = 'Coyote';
+    this.hostile = true; // kept out of `npcs` so it doesn't count toward the Viper bounty
+    this.hp = 20;
+    this.dead = false;
+    this.deathT = 0;
+    this.home = new THREE.Vector3(x, 0, z);
+    this.target = this.home.clone();
+    this.pauseT = rand(0, 4);
+    this.walkPhase = rand(0, 6);
+    this.biteCooldown = 0;
+
+    const g = new THREE.Group();
+    const fur = new THREE.MeshStandardMaterial({ color: 0x9a8768, roughness: 1 });
+    const furDark = new THREE.MeshStandardMaterial({ color: 0x6b5c44, roughness: 1 });
+    const body = box(0.42, 0.4, 1.0, fur, 0, 0.62, 0);
+    const back = box(0.36, 0.12, 0.85, furDark, 0, 0.86, -0.02);
+    const head = box(0.26, 0.26, 0.3, fur, 0, 0.92, 0.6);
+    head.userData.bodyPart = 'head';
+    const snout = box(0.14, 0.13, 0.22, furDark, 0, 0.86, 0.83);
+    const earL = box(0.07, 0.14, 0.04, furDark, -0.09, 1.12, 0.55);
+    const earR = box(0.07, 0.14, 0.04, furDark, 0.09, 1.12, 0.55);
+    const tail = box(0.09, 0.09, 0.5, furDark, 0, 0.72, -0.68);
+    tail.rotation.x = -0.5;
+    const legs = [];
+    for (const [lx, lz] of [[-0.14, 0.35], [0.14, 0.35], [-0.14, -0.35], [0.14, -0.35]]) {
+      const leg = box(0.09, 0.45, 0.1, fur, lx, 0.22, lz);
+      legs.push(leg);
+      g.add(leg);
+    }
+    g.add(body, back, head, snout, earL, earR, tail);
+    g.userData.parts = { head, tail, legL: legs[0], legR: legs[1], armL: legs[2], armR: legs[3] };
+    this.legs = legs;
+    g.position.set(x, terrainHeight(x, z), z);
+    g.rotation.y = rand(0, Math.PI * 2);
+    scene.add(g);
+    this.group = g;
+    g.traverse((o) => { if (o.isMesh) { o.userData.npc = this; npcHitMeshes.push(o); } });
+  }
+
+  damage(amount, hitPoint, opts = {}) {
+    if (this.dead) return;
+    if (opts.part === 'head') amount *= 2;
+    this.hp -= amount;
+    spawnPuff(hitPoint, 0x8a1a10, 0.06, 5, 2, 0.4);
+    if (this.hp <= 0) this.die({ ...opts, hitPoint, overkill: -this.hp });
+  }
+
+  die(opts = {}) {
+    this.dead = true;
+    this.baseY = this.group.position.y;
+    const parts = [];
+    if (opts.part === 'head') parts.push('head');
+    if (Math.random() < (opts.overkill || 0) * 0.04 + (opts.force || 0) * 0.5) {
+      parts.push('tail', Math.random() < 0.5 ? 'legL' : 'armR');
+    }
+    dismember(this.group, parts, opts.hitPoint);
+    toast('Coyote put down. +15 XP');
+    addXP(15);
+    this.group.traverse((o) => {
+      const i = npcHitMeshes.indexOf(o);
+      if (i >= 0) npcHitMeshes.splice(i, 1);
+    });
+  }
+
+  update(dt) {
+    const g = this.group;
+    if (this.dead) {
+      this.deathT = Math.min(1, this.deathT + dt * 2.5);
+      g.rotation.z = Math.PI / 2 * this.deathT;
+      g.position.y = this.baseY + 0.1 * this.deathT;
+      return;
+    }
+    const toPlayer = player.pos.clone().sub(g.position);
+    toPlayer.y = 0;
+    const dist = toPlayer.length();
+    let moving = false;
+    let speed = 2;
+
+    this.biteCooldown -= dt;
+    if (!player.cell && !player.dead && dist < 18) {
+      // Hunt
+      g.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+      if (dist > 1.6) {
+        g.position.addScaledVector(toPlayer.normalize(), 6.2 * dt);
+        moving = true; speed = 6.2;
+      } else if (this.biteCooldown <= 0) {
+        this.biteCooldown = 1.1;
+        damagePlayer(5 + Math.floor(Math.random() * 6));
+        sfx.hit();
+      }
+    } else {
+      // Prowl around home
+      const toTarget = this.target.clone().sub(g.position);
+      toTarget.y = 0;
+      if (toTarget.length() < 0.5) {
+        this.pauseT -= dt;
+        if (this.pauseT <= 0) {
+          const a = rand(0, Math.PI * 2), r = rand(2, 14);
+          this.target.set(this.home.x + Math.cos(a) * r, 0, this.home.z + Math.sin(a) * r);
+          this.pauseT = rand(2, 7);
+        }
+      } else {
+        const dir = toTarget.normalize();
+        g.position.addScaledVector(dir, 2 * dt);
+        g.rotation.y = Math.atan2(dir.x, dir.z);
+        moving = true;
+      }
+    }
+
+    resolveCollisions(g.position, 0.35);
+    g.position.y = terrainHeight(g.position.x, g.position.z);
+
+    if (moving) {
+      this.walkPhase += dt * 3.2 * speed;
+      const s = Math.sin(this.walkPhase) * 0.6;
+      this.legs[0].rotation.x = s; this.legs[1].rotation.x = -s;
+      this.legs[2].rotation.x = -s; this.legs[3].rotation.x = s;
+    }
+  }
+}
+
+// Two guard Jeb's cairn (he did warn you), the rest roam the dunes
+for (const [cx, cz] of [[-102, -28], [-118, -44], [-95, 30], [-60, 80], [40, 95], [95, 55]]) {
+  critters.push(new Coyote(cx, cz));
+}
+
+// ---------------------------------------------------------------------------
 // Weapons — viewmodels bolted to the camera
 // ---------------------------------------------------------------------------
 const gunRoot = new THREE.Group();
@@ -1086,9 +1290,26 @@ function makeRifle() {
   return g;
 }
 
+function makeShotgun() {
+  const g = new THREE.Group();
+  for (const bx of [-0.028, 0.028]) {                                     // twin barrels
+    const barrel = cylinder(0.026, 0.026, 0.62, MAT.darkMetal, bx, 0.05, -0.22, 8);
+    barrel.rotation.x = Math.PI / 2;
+    g.add(barrel);
+  }
+  g.add(box(0.09, 0.07, 0.3, MAT.wood, 0, 0.0, -0.28));                   // forend
+  g.add(box(0.08, 0.09, 0.3, MAT.wood, 0, 0.01, 0.12));                   // receiver/stock body
+  const butt = box(0.07, 0.13, 0.24, MAT.wood, 0, -0.035, 0.33);
+  butt.rotation.x = 0.2;
+  g.add(butt);
+  g.add(box(0.012, 0.025, 0.012, MAT.darkMetal, 0, 0.095, -0.5));         // bead sight
+  return g;
+}
+
 const weapons = [
-  { name: '.357 REVOLVER', mesh: makeRevolver(), damage: 12, magSize: 6, mag: 6, reserve: 48, fireDelay: 0.45, reloadTime: 1.6, spread: 0.012, auto: false },
-  { name: 'COWBOY REPEATER', mesh: makeRifle(), damage: 20, magSize: 7, mag: 7, reserve: 35, fireDelay: 0.8, reloadTime: 2.0, spread: 0.006, auto: false },
+  { name: '.357 REVOLVER', mesh: makeRevolver(), damage: 12, magSize: 6, mag: 6, reserve: 48, fireDelay: 0.45, reloadTime: 1.6, spread: 0.012, owned: true },
+  { name: 'COWBOY REPEATER', mesh: makeRifle(), damage: 20, magSize: 7, mag: 7, reserve: 35, fireDelay: 0.8, reloadTime: 2.0, spread: 0.006, owned: true },
+  { name: 'CARAVAN SHOTGUN', mesh: makeShotgun(), damage: 8, pellets: 6, gibForce: 1, magSize: 2, mag: 2, reserve: 8, fireDelay: 0.7, reloadTime: 2.4, spread: 0.05, owned: false },
 ];
 for (const w of weapons) { w.mesh.visible = false; w.mesh.scale.setScalar(0.8); gunRoot.add(w.mesh); }
 let currentWeapon = 0;
@@ -1105,6 +1326,7 @@ muzzleLight.position.set(0, 0.05, -0.4);
 
 function switchWeapon(i) {
   if (i === currentWeapon || reloading > 0) return;
+  if (!weapons[i].owned) { toast('You don\'t own that. Trader Rosa at the general store sells shotguns.'); return; }
   weapons[currentWeapon].mesh.visible = false;
   currentWeapon = i;
   weapons[i].mesh.visible = true;
@@ -1134,37 +1356,50 @@ function fire() {
   if (w.mag <= 0) { sfx.dry(); startReload(); return; }
   w.mag--;
   fireCooldown = w.fireDelay;
-  recoil = 1;
-  muzzleLight.intensity = 40;
-  sfx.shot();
+  recoil = w.pellets ? 1.6 : 1;
+  muzzleLight.intensity = w.pellets ? 70 : 40;
+  if (w.pellets) sfx.boom(); else sfx.shot();
   updateAmmoHUD();
 
-  const dir = new THREE.Vector3(0, 0, -1)
-    .applyQuaternion(camera.quaternion)
-    .add(new THREE.Vector3(rand(-w.spread, w.spread), rand(-w.spread, w.spread), rand(-w.spread, w.spread)))
-    .normalize();
-  raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
-  raycaster.far = 220;
-
-  const hits = raycaster.intersectObjects([...npcHitMeshes, ...worldMeshes], false);
   const muzzleWorld = gunRoot.localToWorld(new THREE.Vector3(0, 0.05, -0.45));
-  if (hits.length > 0) {
-    const hit = hits[0];
-    spawnTracer(muzzleWorld, hit.point);
-    const npc = hit.object.userData.npc;
-    if (npc) {
-      npc.damage(w.damage + Math.floor(rand(0, 5)), hit.point);
-      sfx.hit();
-      ui.hitmarker.style.opacity = 1;
-      setTimeout(() => (ui.hitmarker.style.opacity = 0), 120);
-      alertBandits();
-    } else {
-      spawnPuff(hit.point, 0xbfa980, 0.06, 4, 1.4, 0.35);
+  const targets = [...npcHitMeshes, ...worldMeshes];
+  const pellets = w.pellets || 1;
+  let landedHit = false, landedCrit = false;
+
+  for (let p = 0; p < pellets; p++) {
+    const dir = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(camera.quaternion)
+      .add(new THREE.Vector3(rand(-w.spread, w.spread), rand(-w.spread, w.spread), rand(-w.spread, w.spread)))
+      .normalize();
+    raycaster.set(camera.getWorldPosition(new THREE.Vector3()), dir);
+    raycaster.far = 220;
+
+    const hits = raycaster.intersectObjects(targets, false);
+    if (hits.length > 0) {
+      const hit = hits[0];
+      if (p < 3) spawnTracer(muzzleWorld, hit.point);
+      const npc = hit.object.userData.npc;
+      if (npc) {
+        landedHit = true;
+        const part = hit.object.userData.bodyPart;
+        if (part === 'head') landedCrit = true;
+        npc.damage(w.damage + Math.floor(rand(0, 5)), hit.point, { part, force: w.gibForce || 0 });
+        alertBandits();
+      } else {
+        spawnPuff(hit.point, 0xbfa980, 0.06, 3, 1.4, 0.35);
+      }
+    } else if (p < 3) {
+      spawnTracer(muzzleWorld, muzzleWorld.clone().addScaledVector(dir, 150));
     }
-  } else {
-    spawnTracer(muzzleWorld, muzzleWorld.clone().addScaledVector(dir, 150));
   }
-  spawnPuff(muzzleWorld, 0xd8d0c0, 0.04, 3, 0.8, 0.3);
+
+  if (landedHit) {
+    sfx.hit();
+    ui.hitmarker.style.color = landedCrit ? '#ff5040' : '#fff';
+    ui.hitmarker.style.opacity = 1;
+    setTimeout(() => (ui.hitmarker.style.opacity = 0), 120);
+  }
+  spawnPuff(muzzleWorld, 0xd8d0c0, 0.04, w.pellets ? 6 : 3, 0.8, 0.3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1215,7 +1450,29 @@ function toggleQuestLog() {
   ui.questLog.style.display = questLogOpen ? 'block' : 'none';
 }
 function startQuest(q) { q.stage = 1; toast(`Quest started: ${q.name}`); updateTracker(); }
-function completeQuest(q, extra = '') { q.stage = 3; sfx.caps(); toast(`Quest completed: ${q.name}${extra ? ' — ' + extra : ''}`); updateTracker(); updateHUD(); }
+function completeQuest(q, extra = '') {
+  q.stage = 3;
+  sfx.caps();
+  toast(`Quest completed: ${q.name}${extra ? ' — ' + extra : ''}, +60 XP`);
+  addXP(60);
+  updateTracker();
+  updateHUD();
+}
+
+// XP & levels: each level needs level*100 XP; leveling up hardens you a little
+function xpToNext() { return player.level * 100; }
+function addXP(n) {
+  player.xp += n;
+  while (player.xp >= xpToNext()) {
+    player.xp -= xpToNext();
+    player.level++;
+    player.maxHp += 10;
+    healPlayer(player.maxHp);
+    sfx.caps();
+    toast(`Welcome to level ${player.level} — max HP is now ${player.maxHp}.`, 4);
+  }
+  updateHUD();
+}
 function onBanditKilled() {
   const q = quests.viper;
   if (q.stage === 1 && banditsLeft() === 0) {
@@ -1394,6 +1651,8 @@ npcByName('Sal').shop = [
   { name: 'Stimpak', price: 25, desc: '+1 stimpak, use with [H]', effect: () => { player.stims++; } },
 ];
 npcByName('Rosa').shop = [
+  { name: 'Caravan shotgun', price: 75, desc: 'double-barrel, slot [3]', once: true, effect: () => { weapons[2].owned = true; toast('Shotgun acquired. Press [3] to draw it.', 4); } },
+  { name: 'Shotgun shells ×6', price: 14, desc: 'buckshot', effect: () => { weapons[2].reserve += 6; updateAmmoHUD(); } },
   { name: '.357 rounds ×12', price: 10, desc: 'revolver ammo', effect: () => { weapons[0].reserve += 12; updateAmmoHUD(); } },
   { name: 'Rifle rounds ×7', price: 12, desc: 'repeater ammo', effect: () => { weapons[1].reserve += 7; updateAmmoHUD(); } },
   { name: 'Stimpak', price: 22, desc: '+1 stimpak, use with [H]', effect: () => { player.stims++; } },
@@ -1415,6 +1674,7 @@ const player = {
   hp: 100, maxHp: 100,
   caps: 25,
   stims: 1,
+  xp: 0, level: 1,
   onGround: true,
   mounted: null,
   cell: null, // interior cell we're standing in, or null for the open world
@@ -1440,7 +1700,14 @@ function resolveCollisions(pos, radius) {
       pos.x = cx + (dx / dist) * radius;
       pos.z = cz + (dz / dist) * radius;
     } else if (distSq <= 1e-9) {
-      pos.x = c.maxX + radius; // degenerate: standing exactly inside — eject east
+      // Standing inside the box: eject through the nearest face
+      const exits = [
+        { d: pos.x - c.minX, go: () => (pos.x = c.minX - radius) },
+        { d: c.maxX - pos.x, go: () => (pos.x = c.maxX + radius) },
+        { d: pos.z - c.minZ, go: () => (pos.z = c.minZ - radius) },
+        { d: c.maxZ - pos.z, go: () => (pos.z = c.maxZ + radius) },
+      ];
+      exits.sort((a, b) => a.d - b.d)[0].go();
     }
   }
   pos.x = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, pos.x));
@@ -1710,8 +1977,7 @@ document.addEventListener('keydown', (e) => {
     else if (nearestInteractable) nearestInteractable.action();
   }
   if (e.code === 'KeyR') startReload();
-  if (e.code === 'Digit1') switchWeapon(0);
-  if (e.code === 'Digit2') switchWeapon(1);
+  if (digit && digit <= weapons.length) switchWeapon(digit - 1);
 });
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
@@ -1723,6 +1989,8 @@ function updateHUD() {
   ui.hpBar.style.width = `${(player.hp / player.maxHp) * 100}%`;
   ui.caps.textContent = player.caps;
   ui.stims.textContent = player.stims;
+  ui.lvl.textContent = player.level;
+  ui.xpBar.style.width = `${(player.xp / xpToNext()) * 100}%`;
 }
 
 // Compass strip: repeated cardinal marks, offset by yaw
@@ -1752,12 +2020,14 @@ function tick() {
   if (locked || player.dead) {
     updatePlayer(dt);
     for (const n of npcs) n.update(dt);
+    for (const c of critters) c.update(dt);
     for (const h of horses) h.update(dt);
     findInteractable();
     updateCompass();
   }
   updateParticles(dt);
   updateTracers(dt);
+  updateGibs(dt);
 
   if (toastTimer > 0) {
     toastTimer -= dt;
@@ -1768,7 +2038,7 @@ function tick() {
 }
 
 // Debug/testing handle
-window.__game = { player, npcs, horses, weapons, quests, cells, enterCell, exitCell };
+window.__game = { player, npcs, horses, weapons, quests, cells, critters, gibs, interactables, enterCell, exitCell, addXP, startDialogue };
 
 // Aim the camera before the first frame so the title screen has a nice backdrop
 camera.position.set(player.pos.x, EYE_WALK, player.pos.z);

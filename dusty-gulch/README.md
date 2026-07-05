@@ -24,9 +24,18 @@ Then open http://localhost:8080 and click to lock the mouse.
   bank, hotel, livery stable, and church, each with false-front facades,
   porches, and painted signs, plus a water tower, hitching rails, and street
   clutter. Desert terrain with dunes, rocks, cacti, and distant mesas.
-- **Guns** — a .357 revolver and a cowboy repeater (keys `1`/`2`), with
-  raycast hitscan, spread, recoil, muzzle flash, tracers, reloading (`R`),
-  ammo reserves, and hitmarkers.
+- **Guns** — a .357 revolver, a cowboy repeater, and a double-barrel
+  caravan shotgun (keys `1`/`2`/`3` — Rosa sells the shotgun), with
+  raycast hitscan, pellet spread, recoil, muzzle flash, tracers,
+  reloading (`R`), ammo reserves, and hitmarkers. Headshots deal double
+  damage and light the hitmarker red.
+- **Dismemberment** — headshot kills pop heads (hats included); overkill
+  and point-blank buckshot take limbs, which tumble off with physics and
+  stay where they land.
+- **XP and levels** — kills and quests grant XP; each level adds
+  +10 max HP. Level and progress bar live in the HP panel.
+- **Wildlife** — coyotes prowl the dunes in loose packs, charge when you
+  get close, and bite. Two of them guard Jeb's cairn, just like he warned.
 - **Horses** — three of them, hitched around town. Walk up, press `E` to
   mount, `SHIFT` to gallop, `E` again to dismount. Legs animate, heads dip
   to graze while idle.
@@ -57,11 +66,11 @@ Then open http://localhost:8080 and click to lock the mouse.
 | Mouse | Look |
 | `LMB` | Shoot |
 | `R` | Reload |
-| `1` / `2` | Revolver / repeater |
 | `SHIFT` | Sprint / gallop |
 | `SPACE` | Jump |
 | `E` | Talk / trade / enter buildings / mount & dismount |
-| `1-9` | Pick dialogue option / buy shop item |
+| `1` `2` `3` | Revolver / repeater / shotgun |
+| `1-9` | Pick dialogue option / buy shop item (in menus) |
 | `Q` | Leave dialogue or shop |
 | `J` | Quest log |
 | `H` | Use a stimpak |
