@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Dusty Gulch — a lightweight New Vegas-like prototype</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🤠</text></svg>">
 <style>
@@ -17,7 +17,7 @@
   #game { position: fixed; inset: 0; display: block; }
 
   /* ---------- HUD ---------- */
-  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
   .panel {
     position: absolute;
     background: rgba(10, 10, 8, 0.55);
@@ -106,6 +106,56 @@
   }
   #stim-line { font-size: 11px; opacity: 0.8; margin-top: 5px; }
 
+  /* ---------- Touch controls ---------- */
+  #touch-ui { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 4; }
+  body.touch #touch-ui { display: block; }
+  body.touch { touch-action: none; overscroll-behavior: none; }
+  #look-zone { position: absolute; right: 0; top: 0; width: 55%; height: 100%; pointer-events: auto; }
+  #stick-zone { position: absolute; left: 0; bottom: 0; width: 45%; height: 65%; pointer-events: auto; }
+  /* While a menu is up, free the thumbs: no look-drag, no stray fire */
+  body.menu-open #look-zone, body.menu-open #stick-zone, body.menu-open .tbtn { display: none; }
+  #stick-base {
+    position: absolute; left: 34px; bottom: 34px; width: 112px; height: 112px;
+    border: 1px solid var(--amber-dim); border-radius: 50%; background: rgba(10,10,8,0.35);
+  }
+  #stick-knob {
+    position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px;
+    border-radius: 50%; background: rgba(255,182,66,0.45); border: 1px solid var(--amber);
+  }
+  .tbtn {
+    position: absolute; pointer-events: auto;
+    background: rgba(10,10,8,0.55); border: 1px solid var(--amber-dim); color: var(--amber);
+    font-family: inherit; font-size: 11px; letter-spacing: 1px;
+    border-radius: 50%; width: 54px; height: 54px;
+    text-shadow: 0 0 6px rgba(255,182,66,0.6);
+  }
+  .tbtn:active { background: rgba(255,182,66,0.3); }
+  #btn-fire { right: 22px; bottom: 86px; width: 88px; height: 88px; font-size: 15px; }
+  #btn-act { right: 126px; bottom: 56px; }
+  #btn-reload { right: 126px; bottom: 128px; }
+  #btn-jump { right: 36px; bottom: 192px; }
+  #btn-weapon { right: 202px; bottom: 32px; }
+  #btn-stim { right: 202px; bottom: 104px; }
+  #btn-log { right: 272px; bottom: 24px; width: 46px; height: 46px; }
+
+  /* Menus stay usable under a thumb */
+  #dialogue, #shop, #quest-log { pointer-events: auto; }
+  #dlg-options div { padding: 8px 0; }
+
+  @media (max-width: 940px) {
+    .panel { padding: 4px 10px; }
+    .big { font-size: 18px; }
+    #compass { width: 220px; height: 20px; }
+    #compass-strip { top: 1px; font-size: 12px; }
+    #health-panel { left: 12px; top: 12px; bottom: auto; min-width: 130px; }
+    #tracker { left: 12px; top: 110px; max-width: 230px; font-size: 11px; }
+    #caps-panel { right: 12px; top: 12px; }
+    #ammo-panel { right: 12px; top: 76px; bottom: auto; min-width: 110px; }
+    #dialogue { bottom: 24%; }
+    #title-screen h1 { font-size: 34px; letter-spacing: 5px; }
+    #title-screen .controls { font-size: 10px; line-height: 1.6; padding: 8px 14px; }
+  }
+
   #toast {
     position: absolute; left: 50%; top: 64px; transform: translateX(-50%);
     font-size: 14px; opacity: 0; transition: opacity 0.4s;
@@ -191,6 +241,17 @@
   </div>
   <div id="toast"></div>
   <div id="fade"></div>
+  <div id="touch-ui">
+    <div id="look-zone"></div>
+    <div id="stick-zone"><div id="stick-base"><div id="stick-knob"></div></div></div>
+    <button class="tbtn" id="btn-fire">FIRE</button>
+    <button class="tbtn" id="btn-act">USE</button>
+    <button class="tbtn" id="btn-reload">RLD</button>
+    <button class="tbtn" id="btn-jump">JMP</button>
+    <button class="tbtn" id="btn-weapon">GUN</button>
+    <button class="tbtn" id="btn-stim">STIM</button>
+    <button class="tbtn" id="btn-log">LOG</button>
+  </div>
   <div id="damage-vignette"></div>
   <div id="death-screen"><h1>YOU DIED</h1><div>The desert keeps what it takes.</div></div>
 </div>

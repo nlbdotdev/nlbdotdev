@@ -87,8 +87,13 @@ const sfx = {
 // ---------------------------------------------------------------------------
 // Renderer / scene / camera / lights
 // ---------------------------------------------------------------------------
+// Touch device? Swap pointer lock for a virtual joystick + look-drag.
+const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const touch = { active: false, x: 0, y: 0, sprint: false };
+if (IS_TOUCH) document.body.classList.add('touch');
+
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1448,6 +1453,7 @@ function toggleQuestLog() {
   questLogOpen = !questLogOpen;
   if (questLogOpen) renderQuestLog();
   ui.questLog.style.display = questLogOpen ? 'block' : 'none';
+  updateMenuClass();
 }
 function startQuest(q) { q.stage = 1; toast(`Quest started: ${q.name}`); updateTracker(); }
 function completeQuest(q, extra = '') {
@@ -1525,6 +1531,7 @@ function openShop(npc) {
   shopNPC = npc;
   renderShop();
   ui.shop.style.display = 'block';
+  updateMenuClass();
 }
 function renderShop() {
   ui.shopName.textContent = `${shopNPC.name.toUpperCase()} — GOODS FOR SALE`;
@@ -1537,6 +1544,7 @@ function renderShop() {
     row.innerHTML =
       `<span>[${i + 1}] ${item.name}${item.soldOut ? ' (sold)' : ''} &nbsp;<span class="desc">${item.desc}</span></span>` +
       `<span>${item.price} caps</span>`;
+    row.addEventListener('click', () => buyItem(i)); // tappable on touch
     ui.shopRows.appendChild(row);
   });
 }
@@ -1552,7 +1560,7 @@ function buyItem(i) {
   updateHUD();
   renderShop();
 }
-function closeShop() { shopNPC = null; ui.shop.style.display = 'none'; }
+function closeShop() { shopNPC = null; ui.shop.style.display = 'none'; updateMenuClass(); }
 
 function healPlayer(n) { player.hp = Math.min(player.maxHp, player.hp + n); updateHUD(); }
 function useStim() {
@@ -1771,11 +1779,14 @@ function updatePlayer(dt) {
   if (keys['KeyS']) input.sub(forward);
   if (keys['KeyD']) input.add(right);
   if (keys['KeyA']) input.sub(right);
-  if (input.lengthSq() > 0) input.normalize();
+  if (touch.x || touch.y) {
+    input.addScaledVector(forward, -touch.y).addScaledVector(right, touch.x);
+  }
+  if (input.lengthSq() > 1) input.normalize();
 
   if (player.mounted) {
     const h = player.mounted;
-    const gallop = keys['ShiftLeft'] || keys['ShiftRight'];
+    const gallop = keys['ShiftLeft'] || keys['ShiftRight'] || touch.sprint;
     const speed = input.lengthSq() > 0 ? (gallop ? 16 : 8) : 0;
     h.speed = THREE.MathUtils.lerp(h.speed, speed, dt * 3);
     if (input.lengthSq() > 0) {
@@ -1795,7 +1806,7 @@ function updatePlayer(dt) {
     player.pos.copy(h.pos);
     camera.position.set(player.pos.x, h.pos.y + EYE_RIDE + bob, player.pos.z);
   } else {
-    const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+    const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || touch.sprint;
     const speed = sprint ? 8.5 : 4.8;
 
     player.pos.addScaledVector(input, speed * dt);
@@ -1897,6 +1908,7 @@ function renderDialogue() {
     currentNode.options.forEach((o, i) => {
       const div = document.createElement('div');
       div.textContent = `[${i + 1}] ${o.label}`;
+      div.addEventListener('click', () => chooseOption(i)); // tappable on touch
       ui.dlgOptions.appendChild(div);
     });
     ui.dlgHint.textContent = '[1-9] choose  /  [Q] leave';
@@ -1904,6 +1916,7 @@ function renderDialogue() {
     ui.dlgHint.textContent = '[E] continue  /  [Q] leave';
   }
   ui.dialogue.style.display = 'block';
+  updateMenuClass();
 }
 function chooseOption(i) {
   const opt = currentNode && currentNode.options && currentNode.options[i];
@@ -1929,6 +1942,13 @@ function endDialogue() {
   dialogueNPC = null;
   currentNode = null;
   ui.dialogue.style.display = 'none';
+  updateMenuClass();
+}
+
+// Touch UX: hide the stick/look zones while any menu is open
+function updateMenuClass() {
+  const open = !!(dialogueNPC || shopNPC || questLogOpen);
+  document.body.classList.toggle('menu-open', open);
 }
 
 // ---------------------------------------------------------------------------
@@ -1938,7 +1958,12 @@ let locked = false;
 
 ui.title.addEventListener('click', () => {
   audioInit();
-  canvas.requestPointerLock();
+  if (IS_TOUCH) {
+    touch.active = true;
+    ui.title.style.display = 'none';
+  } else {
+    canvas.requestPointerLock();
+  }
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
@@ -1982,6 +2007,106 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // ---------------------------------------------------------------------------
+// Touch controls — virtual stick (left), look-drag (right), button cluster
+// ---------------------------------------------------------------------------
+if (IS_TOUCH) {
+  const stickZone = $('stick-zone'), stickBase = $('stick-base'), stickKnob = $('stick-knob');
+  const lookZone = $('look-zone');
+  let stickId = null, lookId = null, lookLast = null;
+
+  function updateStick(t) {
+    const r = stickBase.getBoundingClientRect();
+    let dx = (t.clientX - (r.left + r.width / 2)) / (r.width / 2);
+    let dy = (t.clientY - (r.top + r.height / 2)) / (r.height / 2);
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    touch.x = dx; touch.y = dy;
+    touch.sprint = m > 0.92;
+    stickKnob.style.transform = `translate(${dx * 34}px, ${dy * 34}px)`;
+  }
+  function resetStick() {
+    stickId = null;
+    touch.x = touch.y = 0;
+    touch.sprint = false;
+    stickKnob.style.transform = 'translate(0,0)';
+  }
+  stickZone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (stickId === null) { stickId = e.changedTouches[0].identifier; updateStick(e.changedTouches[0]); }
+  }, { passive: false });
+  stickZone.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) if (t.identifier === stickId) updateStick(t);
+  }, { passive: false });
+  for (const ev of ['touchend', 'touchcancel']) {
+    stickZone.addEventListener(ev, (e) => {
+      for (const t of e.changedTouches) if (t.identifier === stickId) resetStick();
+    });
+  }
+
+  lookZone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (lookId === null) {
+      const t = e.changedTouches[0];
+      lookId = t.identifier;
+      lookLast = { x: t.clientX, y: t.clientY };
+    }
+  }, { passive: false });
+  lookZone.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== lookId || player.dead) continue;
+      player.yaw -= (t.clientX - lookLast.x) * 0.006;
+      player.pitch -= (t.clientY - lookLast.y) * 0.006;
+      player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch));
+      lookLast = { x: t.clientX, y: t.clientY };
+    }
+  }, { passive: false });
+  for (const ev of ['touchend', 'touchcancel']) {
+    lookZone.addEventListener(ev, (e) => {
+      for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null;
+    });
+  }
+
+  // Buttons
+  const onTap = (id, fn) => $(id).addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false });
+  let fireHold = null;
+  $('btn-fire').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    fire();
+    fireHold = setInterval(fire, 120);
+  }, { passive: false });
+  for (const ev of ['touchend', 'touchcancel']) {
+    $('btn-fire').addEventListener(ev, () => { clearInterval(fireHold); fireHold = null; });
+  }
+  onTap('btn-act', () => {
+    if (!touch.active) return;
+    if (shopNPC) { closeShop(); return; }
+    if (dialogueNPC) { advanceDialogue(); return; }
+    if (player.mounted) { dismount(); return; }
+    if (nearestInteractable) nearestInteractable.action();
+  });
+  onTap('btn-reload', startReload);
+  onTap('btn-jump', () => {
+    keys['Space'] = true;
+    setTimeout(() => (keys['Space'] = false), 150);
+  });
+  onTap('btn-weapon', () => {
+    for (let k = 1; k <= weapons.length; k++) {
+      const i = (currentWeapon + k) % weapons.length;
+      if (weapons[i].owned) { switchWeapon(i); break; }
+    }
+  });
+  onTap('btn-stim', useStim);
+  onTap('btn-log', toggleQuestLog);
+
+  // Menus close/advance by tapping: text = continue, hint = leave
+  ui.dlgText.addEventListener('click', () => advanceDialogue());
+  ui.dlgHint.addEventListener('click', () => endDialogue());
+  ui.shop.querySelector('.hint').addEventListener('click', () => closeShop());
+}
+
+// ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
 function updateHUD() {
@@ -2017,7 +2142,7 @@ function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (locked || player.dead) {
+  if (locked || touch.active || player.dead) {
     updatePlayer(dt);
     for (const n of npcs) n.update(dt);
     for (const c of critters) c.update(dt);
@@ -2038,7 +2163,7 @@ function tick() {
 }
 
 // Debug/testing handle
-window.__game = { player, npcs, horses, weapons, quests, cells, critters, gibs, interactables, enterCell, exitCell, addXP, startDialogue };
+window.__game = { player, npcs, horses, weapons, quests, cells, critters, gibs, interactables, enterCell, exitCell, addXP, startDialogue, touch };
 
 // Aim the camera before the first frame so the title screen has a nice backdrop
 camera.position.set(player.pos.x, EYE_WALK, player.pos.z);
