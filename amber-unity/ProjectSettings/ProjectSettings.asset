@@ -1,0 +1,206 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: 0a1b2c3d4e5f60718293a4b5c6d7e8f9
+  AndroidProfiler: 0
+  AndroidFilterTouchesWhenObscured: 0
+  AndroidEnableSustainedPerformanceMode: 0
+  defaultScreenOrientation: 4
+  targetDevice: 2
+  useOnDemandResources: 0
+  accelerometerFrequency: 60
+  companyName: Amber
+  productName: Amber
+  defaultCursor: {fileID: 0}
+  cursorHotspot: {x: 0, y: 0}
+  m_SplashScreenBackgroundColor: {r: 0.13, g: 0.12, b: 0.11, a: 1}
+  m_ShowUnitySplashScreen: 1
+  m_ShowUnitySplashLogo: 1
+  m_SplashScreenOverlayOpacity: 1
+  m_SplashScreenAnimation: 1
+  m_SplashScreenLogoStyle: 1
+  m_SplashScreenDrawMode: 0
+  m_SplashScreenBackgroundAnimationZoom: 1
+  m_SplashScreenLogoAnimationZoom: 1
+  m_SplashScreenBackgroundLandscapeAspect: 1
+  m_SplashScreenBackgroundPortraitAspect: 1
+  m_VirtualRealitySplashScreen: {fileID: 0}
+  m_HolographicTrackingLossScreen: {fileID: 0}
+  defaultScreenWidth: 1280
+  defaultScreenHeight: 720
+  defaultScreenWidthWeb: 960
+  defaultScreenHeightWeb: 600
+  m_StereoRenderingPath: 0
+  m_ActiveColorSpace: 1
+  unsupportedMSAAFallback: 0
+  m_SpriteBatchVertexThreshold: 300
+  m_MTRendering: 1
+  mipStripping: 0
+  numberOfMipsStripped: 0
+  m_StackTraceTypes: 010000000100000001000000010000000100000001000000
+  iosShowActivityIndicatorOnLoading: -1
+  androidShowActivityIndicatorOnLoading: -1
+  iosUseCustomAppBackgroundBehavior: 0
+  allowedAutorotateToPortrait: 1
+  allowedAutorotateToPortraitUpsideDown: 1
+  allowedAutorotateToLandscapeRight: 1
+  allowedAutorotateToLandscapeLeft: 1
+  useOSAutorotation: 1
+  use32BitDisplayBuffer: 1
+  preserveFramebufferAlpha: 0
+  disableDepthAndStencilBuffers: 0
+  androidStartInFullscreen: 1
+  androidRenderOutsideSafeArea: 1
+  androidUseSwappy: 1
+  androidBlitType: 0
+  androidResizableWindow: 0
+  androidDefaultWindowWidth: 1920
+  androidDefaultWindowHeight: 1080
+  androidMinimumWindowWidth: 400
+  androidMinimumWindowHeight: 300
+  androidFullscreenMode: 1
+  defaultIsNativeResolution: 1
+  macRetinaSupport: 1
+  runInBackground: 1
+  captureSingleScreen: 0
+  muteOtherAudioSources: 0
+  Prepare IOS For Recording: 0
+  Force IOS Speakers When Recording: 0
+  deferSystemGesturesMode: 0
+  hideHomeButton: 0
+  submitAnalytics: 1
+  usePlayerLog: 1
+  dedicatedServerOptimizations: 1
+  bakeCollisionMeshes: 0
+  forceSingleInstance: 0
+  useFlipModelSwapchain: 1
+  resizableWindow: 1
+  useMacAppStoreValidation: 0
+  macAppStoreCategory: public.app-category.games
+  gpuSkinning: 1
+  meshDeformation: 2
+  visibleInBackground: 1
+  allowFullscreenSwitch: 1
+  fullscreenMode: 1
+  metalFramebufferOnly: 0
+  vulkanNumSwapchainBuffers: 3
+  vulkanEnableSetSRGBWrite: 0
+  vulkanEnablePreTransform: 0
+  vulkanEnableLateAcquireNextImage: 0
+  vulkanEnableCommandBufferRecycling: 1
+  loadStoreDebugModeEnabled: 0
+  bundleVersion: 0.1.0
+  preloadedAssets: []
+  metroInputSource: 0
+  m_HolographicPauseOnTrackingLoss: 1
+  vrSettings:
+    enable360StereoCapture: 0
+  enableFrameTimingStats: 0
+  enableOpenGLProfilerGPURecorders: 1
+  allowHDRDisplaySupport: 0
+  useHDRDisplay: 0
+  hdrBitDepth: 0
+  m_ColorGamuts: 00000000
+  targetPixelDensity: 30
+  resolutionScalingMode: 0
+  resetResolutionOnWindowResize: 0
+  androidSupportedAspectRatio: 1
+  androidMaxAspectRatio: 2.1
+  applicationIdentifier:
+    Standalone: com.amber.game
+  buildNumber:
+    Standalone: 0
+  overrideDefaultApplicationIdentifier: 1
+  AndroidBundleVersionCode: 1
+  AndroidMinSdkVersion: 23
+  AndroidTargetSdkVersion: 0
+  AndroidPreferredInstallLocation: 1
+  aotOptions:
+  stripEngineCode: 1
+  iPhoneStrippingLevel: 0
+  iPhoneScriptCallOptimization: 0
+  ForceInternetPermission: 0
+  ForceSDCardPermission: 0
+  CreateWallpaper: 0
+  APKExpansionFiles: 0
+  keepLoadedShadersAlive: 0
+  StripUnusedMeshComponents: 1
+  strictShaderVariantMatching: 0
+  VertexChannelCompressionMask: 4054
+  iPhoneSdkVersion: 988
+  iOSTargetOSVersionString: 13.0
+  tvOSSdkVersion: 0
+  tvOSRequireExtendedGameController: 0
+  tvOSTargetOSVersionString: 13.0
+  uIPrerenderedIcon: 0
+  uIRequiresPersistentWiFi: 0
+  uIRequiresFullScreen: 1
+  uIStatusBarHidden: 1
+  uIExitOnSuspend: 0
+  uIStatusBarStyle: 0
+  iOSLaunchScreenType: 0
+  iOSLaunchScreenBackgroundColor:
+    serializedVersion: 2
+    rgba: 0
+  iOSLaunchScreenFillPct: 100
+  iOSLaunchScreenSize: 100
+  iOSLaunchScreeniPadType: 0
+  iOSLaunchScreeniPadBackgroundColor:
+    serializedVersion: 2
+    rgba: 0
+  iOSLaunchScreeniPadFillPct: 100
+  iOSLaunchScreeniPadSize: 100
+  iOSDeviceRequirements: []
+  iOSURLSchemes: []
+  macOSURLSchemes: []
+  iOSBackgroundModes: 0
+  iOSMetalForceHardShadows: 0
+  metalEditorSupport: 1
+  metalAPIValidation: 1
+  iOSRenderExtraFrameOnPause: 0
+  iosCopyPluginsCodeInsteadOfSymlink: 0
+  appleDeveloperTeamID:
+  iOSManualSigningProvisioningProfileID:
+  iOSManualSigningProvisioningProfileType: 0
+  appleEnableAutomaticSigning: 0
+  keystoreName:
+  keyaliasName:
+  buildAPKPerCPUArchitecture: 0
+  m_SupportedNpadStyles: 22
+  m_NpadHandheldActivationMode: 0
+  scriptingDefineSymbols: {}
+  additionalCompilerArguments: {}
+  platformArchitecture: {}
+  scriptingBackend: {}
+  il2cppCompilerConfiguration: {}
+  il2cppCodeGeneration: {}
+  managedStrippingLevel: {}
+  incrementalIl2cppBuild: {}
+  suppressCommonWarnings: 1
+  allowUnsafeCode: 0
+  useDeterministicCompilation: 1
+  scriptingRuntimeVersion: 1
+  gcIncremental: 1
+  gcWBarrierValidation: 0
+  apiCompatibilityLevelPerPlatform: {}
+  editorAssembliesCompatibilityLevel: 1
+  m_RenderingPath: 1
+  m_MobileRenderingPath: 1
+  platformCapabilities: {}
+  metroTargetDeviceFamilies: {}
+  vcxProjDefaultLanguage:
+  activeInputHandler: 2
+  cloudProjectId:
+  framebufferDepthMemorylessMode: 0
+  qualitySettingsNames: []
+  projectName:
+  organizationId:
+  cloudEnabled: 0
+  legacyClampBlendShapeWeights: 0
+  hmiLoadingImage: {fileID: 0}
+  platformRequiresReadableAssets: 0
+  virtualTexturingSupportEnabled: 0
+  insecureHttpOption: 0

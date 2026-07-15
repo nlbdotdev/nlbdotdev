@@ -1,0 +1,19 @@
+{
+    "name": "Amber",
+    "rootNamespace": "Amber",
+    "references": [
+        "Unity.InputSystem",
+        "Unity.Cinemachine",
+        "Unity.TextMeshPro",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
